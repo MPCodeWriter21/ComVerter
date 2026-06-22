@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/MPCodeWriter21/Tigo/master/schemas/config.schema.json
+
+sort_by: priority        # Sort tasks by id, priority, due-date, or title
+default_priority: 50     # The default priority for new tasks
+frame_style: round       # The style of the frames (round, double, single)
+show_closed: false       # Whether to show closed tasks in the list by default
+due_color_enabled: true  # Whether to color the due date based on how close it is
+tag_sort_order: length   # Sort tags: none, alphabetical, reverse-alphabetical, length, reverse-length

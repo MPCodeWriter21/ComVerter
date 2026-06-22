@@ -1,0 +1,32 @@
+[build-system]
+requires = ["meson-python>=0.17", "ninja"]
+build-backend = "mesonpy"
+
+[project]
+name = "comverter"
+version = "0.1.0"
+description = "ComVerter - The Common Converter"
+readme = "README.md"
+requires-python = ">=3.10"
+
+authors = [
+    { name = "CodeWriter21", email = "CodeWriter21@gmail.com" },
+]
+license = "MIT"
+keywords = ["converter", "commonmark", "markdown"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: C",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Markup",
+]
+
+[project.urls]
+Homepage = "https://github.com/MPCodeWriter21/comverter"
+Repository = "https://github.com/MPCodeWriter21/comverter.git"
