@@ -28,7 +28,8 @@ jobs:
       - name: Build wheel
         env:
           UV_PYTHON_PREFERENCE: only-system
-        run: uv build --wheel
+        run: |
+          uv python pin ${{ matrix.python-version }} && uv build --wheel
 
       - name: Install wheel
         run: uv pip install dist/comverter-*.whl --force-reinstall --system
