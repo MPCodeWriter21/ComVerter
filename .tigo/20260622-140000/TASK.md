@@ -16,4 +16,6 @@ This includes:
 
 The two specs `https://github.github.com/gfm/` and `https://spec.commonmark.org/0.31.2/`, must be completely supported.
 
+It's probably a good idea to split the code into multiple files; especially since markdown-to-html is not the only operation the package is meant to do.
+
 hello_world function will be removed after this task has been closed with success.
