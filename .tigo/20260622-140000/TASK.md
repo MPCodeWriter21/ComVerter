@@ -1,6 +1,6 @@
 # Implement CommonMark/Markdown to HTML conversion
 
-- STATUS: CLOSED
+- STATUS: OPEN
 - PRIORITY: 90
 - TAGS: core, commonmark, implementation
 
@@ -13,5 +13,7 @@ This includes:
 - Adding corresponding Python-level tests for various Markdown inputs
 - Updating the `__init__.py` to export the new function
 - Adding proper error handling for invalid inputs
+
+The two specs `https://github.github.com/gfm/` and `https://spec.commonmark.org/0.31.2/`, must be completely supported.
 
 hello_world function will be removed after this task has been closed with success.
