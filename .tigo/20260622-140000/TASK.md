@@ -1,6 +1,6 @@
 # Implement CommonMark/Markdown to HTML conversion
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 90
 - TAGS: core, commonmark, implementation
 
