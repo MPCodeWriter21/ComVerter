@@ -2,7 +2,7 @@ ComVerter - The Common Converter
 ================================
 
 ComVerter is a simple C Python extension that I plan to use for converting some simple
-formats to others. E.g. Markdown to HTML.
+formats to others. Like Markdown to HTML, HTML to PDF, and many others.
 
 Build & Install (Release)
 -------------------------
@@ -21,10 +21,30 @@ Usage
 -----
 
 ```python
->>> from comverter import hello_world
->>> hello_world()
-Hello World!
+>>> from comverter import markdown_to_html
+>>> markdown_to_html("Hello, **world**!")
+'<p>Hello, <strong>world</strong>!</p>\n'
 ```
+
+### Supported Markdown features
+
+- **ATX headings** — `# H1` through `###### H6`
+- **Paragraphs** — consecutive lines of text
+- **Emphasis** — `*italic*` and `_italic_`
+- **Strong emphasis** — `**bold**` and `__bold__`
+- **Code spans** — `` `code` ``
+- **Links** — `[text](url)` with optional `"title"`
+- **Images** — `![alt](src)` with optional `"title"`
+- **Fenced code blocks** — `` ``` `` and `` ~~~ ``
+- **Blockquotes** — `> quote`
+- **Unordered lists** — `- item`, `* item`, `+ item`
+- **Ordered lists** — `1. item`
+- **Thematic breaks** — `---`, `***`, `___`
+- **Hard line breaks** — two trailing spaces
+- **Backslash escapes** — `\*`, `\[`, etc.
+- **Automatic HTML escaping** — `<`, `>`, `&`, `"`
+- **Setext headings** — `Heading\n===` (level 1) and `Heading\n---` (level 2)
+- **GFM pipe tables** — `\| a \| b \|\n\|---\|---\|\n\| 1 \| 2 \|` with optional alignment
 
 Development
 ----------
@@ -40,12 +60,11 @@ Run `make help` to see all available targets:
 | `make test`  | Run tests                                |
 | `make clean` | Remove build artifacts                   |
 
-### LSP / clangd
+### LSP
 
-If your editor supports clangd (Neovim, VS Code, etc.), there's a `.clangd`
-config file in the project root. Once meson is configured (`make setup`),
-`builddir/compile_commands.json` is generated automatically, giving you
-completions, diagnostics, and go-to-definition for the Python C API.
+Once meson is configured (`make setup`), `compile_commands.json` is
+generated automatically, giving you completions, diagnostics, and
+go-to-definition for the Python C API.
 
 Task Management
 ---------------
@@ -62,8 +81,10 @@ References
 ----------
 
 - [Python C API](https://docs.python.org/3/c-api/index.html)
-- [CommonMark](https://commonmark.org/)
+- [GitHub Flavored Markdown](https://github.github.com/gfm/)
+- [CommonMark](https://spec.commonmark.org/0.31.2/)
 - [Markdown on WikiPedia](https://en.wikipedia.org/wiki/Markdown)
+- [HTML Spec](https://html.spec.whatwg.org/)
 - [RFC 2854](https://datatracker.ietf.org/doc/html/rfc2854)
 - [RFC 7763](https://datatracker.ietf.org/doc/html/rfc7763)
 - [RFC 7764](https://datatracker.ietf.org/doc/html/rfc7764)

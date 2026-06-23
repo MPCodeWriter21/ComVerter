@@ -34,7 +34,12 @@ build:
 test:
 	uv pip install -q pytest
 	uv pip install -e .
-	uv run pytest -v tests/
+	uv run pytest -v --maxfail 3 tests/
+
+test-all:
+	uv pip install -q pytest
+	uv pip install -e .
+	uv run pytest -q tests/
 
 clean:
 	-uv run meson compile -C $(BUILDDIR) --clean 2>/dev/null

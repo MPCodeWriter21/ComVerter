@@ -41,12 +41,12 @@ AlignTrailingComments:
 AllowAllArgumentsOnNextLine: true
 AllowAllParametersOfDeclarationOnNextLine: true
 AllowShortBlocksOnASingleLine: true
-AllowShortCaseLabelsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: true
 AllowShortEnumsOnASingleLine: true
 AllowShortFunctionsOnASingleLine: true
-AllowShortIfStatementsOnASingleLine: Never
+AllowShortIfStatementsOnASingleLine: Always
 AllowShortLambdasOnASingleLine: All
-AllowShortLoopsOnASingleLine: false
+AllowShortLoopsOnASingleLine: true
 AlwaysBreakAfterDefinitionReturnType: None
 AlwaysBreakAfterReturnType: None
 AlwaysBreakBeforeMultilineStrings: false
@@ -59,13 +59,13 @@ BitFieldColonSpacing: Both
 BraceWrapping:
   AfterCaseLabel:  false
   AfterClass:      true
-  AfterControlStatement: Always
-  AfterEnum:       true
+  AfterControlStatement: false
+  AfterEnum:       false
   AfterExternBlock: true
-  AfterFunction:   true
+  AfterFunction:   false
   AfterNamespace:  true
   AfterObjCDeclaration: true
-  AfterStruct:     true
+  AfterStruct:     false
   AfterUnion:      false
   BeforeCatch:     true
   BeforeElse:      true
