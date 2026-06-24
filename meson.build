@@ -12,7 +12,13 @@ py.install_sources(
 
 py.extension_module(
   '_comverter',
-  'src/comverter/_comverter.c',
+  [
+    'src/comverter/_comverter.c',
+    'src/comverter/md_core.c',
+    'src/comverter/md_html.c',
+    'src/comverter/md_inline.c',
+    'src/comverter/md_blocks.c',
+  ],
   install: true,
   subdir: 'comverter',
 )

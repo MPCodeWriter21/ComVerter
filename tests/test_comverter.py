@@ -122,12 +122,12 @@ def test_ordered_list():
 
 def test_blockquote():
     result = markdown_to_html("> A quote")
-    assert result == "<blockquote>\nA quote\n</blockquote>\n"
+    assert result == "<blockquote>\n<p>A quote</p>\n</blockquote>\n"
 
 
 def test_blockquote_multiple_lines():
     result = markdown_to_html("> Line 1\n> Line 2")
-    assert result == "<blockquote>\nLine 1\nLine 2\n</blockquote>\n"
+    assert result == "<blockquote>\n<p>Line 1\nLine 2</p>\n</blockquote>\n"
 
 
 def test_thematic_break_dashes():
