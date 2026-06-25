@@ -107,7 +107,7 @@ def test_fenced_code_block():
 
 def test_fenced_code_block_with_language():
     result = markdown_to_html("```python\nprint('hello')\n```")
-    assert result == "<pre><code>print('hello')\n</code></pre>\n"
+    assert result == '<pre><code class="language-python">print(\'hello\')\n</code></pre>\n'
 
 
 def test_unordered_list():
