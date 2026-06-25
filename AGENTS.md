@@ -66,3 +66,13 @@ Cross-platform
 
 - Avoid Windows-specific paths, APIs, or idioms
 - Makefile uses POSIX conventions with `VENV_BIN` variable for portability
+
+Debugging with Python code
+--------------------------
+
+Do not directly use "python -c ...". Instead, write a temporary script and name
+it `_debug_{REASON_FOR_CREATION}.py`, and run it using uv:
+`uv run _debug_{REASON_FOR_CREATION}.py`
+
+One general rule to keep in mind is to avoid directly using `python` and
+instead running everything python related via uv.
