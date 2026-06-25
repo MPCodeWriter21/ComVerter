@@ -70,6 +70,23 @@ int is_html_tag(const char *text, size_t len, size_t *consumed) {
     if (j >= len) return 0;
 
     size_t tag_end = j;
+    /* Check for disallowed HTML tags (GFM spec) */
+    {
+        static const char *disallowed[] = {
+            "title", "textarea", "style", "xmp", "pre", "script",
+            "iframe", "noembed", "noframes", "noscript", "plaintext", NULL
+        };
+        size_t nl = tag_end - 1;
+        for (int di = 0; disallowed[di]; di++) {
+            size_t dl = strlen(disallowed[di]);
+            if (nl == dl) {
+                int m = 1;
+                for (size_t ci = 0; ci < dl; ci++)
+                    if (tolower((unsigned char)text[1 + ci]) != disallowed[di][ci]) { m = 0; break; }
+                if (m) return 0;
+            }
+        }
+    }
     int has_line = 0;
     skip_ws_newline(text, len, &j, &has_line);
     if (j >= len) return 0;
@@ -218,10 +235,12 @@ int is_html_block_start(const char *line, size_t len) {
     if (remaining >= 3 && tag[1] == '!' && tag[2] >= 'A' && tag[2] <= 'Z') return 4;
     if (remaining >= 9 && memcmp(tag, "<![CDATA[", 9) == 0) return 5;
     if (is_html_block_tag(tag, remaining)) {
-        if (tag[1] == '/') return 7;
-        return 6;
+        if (tag[1] != '/') return 6;
+        /* Closing block-level tags: must pass the type 7 check below
+           (only whitespace allowed after the closing tag) */
     }
-    /* Type 7: complete open/close tag followed only by whitespace or end */
+    /* Type 7: complete open/close tag (any tag name except script/style/pre/textarea)
+       followed only by whitespace or end of line */
     {
         const char *rest = tag;
         size_t rest_len = remaining;
@@ -229,7 +248,30 @@ int is_html_block_start(const char *line, size_t len) {
         if (is_html_tag(rest, rest_len, &tag_consumed) && tag_consumed > 0) {
             size_t after = tag_consumed;
             while (after < rest_len && (rest[after] == ' ' || rest[after] == '\t')) after++;
-            if (after == rest_len) return 7;
+            if (after == rest_len) {
+                const char *tn = rest + 1;
+                if (tn[0] == '/') tn++;
+                size_t tn_len = 0;
+                while (tn_len < rest_len - (size_t)(tn - rest) &&
+                       (isalnum((unsigned char)tn[tn_len]) || tn[tn_len] == '-')) tn_len++;
+                int is_excluded = (tn_len == 6 &&
+                    ((tn[0]=='s'||tn[0]=='S') && (tn[1]=='c'||tn[1]=='C') &&
+                     (tn[2]=='r'||tn[2]=='R') && (tn[3]=='i'||tn[3]=='I') &&
+                     (tn[4]=='p'||tn[4]=='P') && (tn[5]=='t'||tn[5]=='T'))) ||
+                    (tn_len == 5 &&
+                    ((tn[0]=='s'||tn[0]=='S') && (tn[1]=='t'||tn[1]=='T') &&
+                     (tn[2]=='y'||tn[2]=='Y') && (tn[3]=='l'||tn[3]=='L') &&
+                     (tn[4]=='e'||tn[4]=='E'))) ||
+                    (tn_len == 3 &&
+                    ((tn[0]=='p'||tn[0]=='P') && (tn[1]=='r'||tn[1]=='R') &&
+                     (tn[2]=='e'||tn[2]=='E'))) ||
+                    (tn_len == 8 &&
+                    ((tn[0]=='t'||tn[0]=='T') && (tn[1]=='e'||tn[1]=='E') &&
+                     (tn[2]=='x'||tn[2]=='X') && (tn[3]=='t'||tn[3]=='T') &&
+                     (tn[4]=='a'||tn[4]=='A') && (tn[5]=='r'||tn[5]=='R') &&
+                     (tn[6]=='e'||tn[6]=='E') && (tn[7]=='a'||tn[7]=='A')));
+                if (!is_excluded) return 7;
+            }
         }
     }
     return 0;

@@ -2,6 +2,7 @@
 
 #define MAX_RUNS 1024
 #define MAX_MATCHES 1024
+#define MAX_STRIKE 512
 
 typedef struct {
     char delim;
@@ -19,7 +20,12 @@ typedef struct {
     int is_strong;
 } EmMatch;
 
-static int pos_inside_link(const char *text, size_t len, size_t pos) {
+typedef struct {
+    size_t opener_pos;
+    size_t closer_pos;
+} StrikeMatch;
+
+static int pos_inside_link(const char *text, size_t len, size_t pos, RefDef *refs, int n_refs) {
     size_t bracket = pos;
     while (bracket > 0 && text[bracket] != '[') {
         if (text[bracket] == '\\' && bracket > 0) bracket--;
@@ -35,6 +41,35 @@ static int pos_inside_link(const char *text, size_t len, size_t pos) {
         close++;
     }
     if (depth != 0 || close >= len) return 0;
+    {
+        size_t ns = bracket + 1;
+        while (ns < close) {
+            if (text[ns] == '[') {
+                int nd = 1;
+                size_t nc = ns + 1;
+                while (nc < close && nd > 0) {
+                    if (text[nc] == '[') nd++;
+                    else if (text[nc] == ']') { nd--; if (nd == 0) break; }
+                    nc++;
+                }
+                if (nd == 0 && nc < close) {
+                    if (nc + 1 < close && text[nc + 1] == '(') {
+                        int pd = 1;
+                        size_t p = nc + 2;
+                        while (p < close && pd > 0) {
+                            if (text[p] == '(') pd++;
+                            else if (text[p] == ')') pd--;
+                            if (pd > 0) p++;
+                        }
+                        if (pd == 0) return 0;
+                    }
+                    if (nc + 1 < close && text[nc + 1] == '[') return 0;
+                    if (nc + 1 <= close && text[nc + 1] == ']') return 0;
+                }
+            }
+            ns++;
+        }
+    }
     if (close + 1 < len && text[close + 1] == '(') {
         int pd = 1;
         size_t k = close + 2;
@@ -60,7 +95,16 @@ static int pos_inside_link(const char *text, size_t len, size_t pos) {
     if (bracket > 0 && text[bracket - 1] == '!') return 0;
     if (pos >= bracket + 1 && pos < close) {
         size_t after_close = close + 1;
-        return (after_close < len && text[after_close] == ']') ? 1 : 0;
+        if (after_close < len && text[after_close] == ']')
+            return 1;
+        if (refs && n_refs > 0) {
+            const char *label = text + bracket + 1;
+            size_t label_len = close - bracket - 1;
+            RefDef *found = NULL;
+            if (find_ref(refs, n_refs, label, label_len, &found))
+                return 1;
+        }
+        return 0;
     }
     return 0;
 }
@@ -85,7 +129,7 @@ static int pos_inside_raw_html_or_autolink(const char *text, size_t len, size_t 
     return 0;
 }
 
-static int collect_delim_runs(const char *text, size_t len, DelimRun runs[], int max_runs) {
+static int collect_delim_runs(const char *text, size_t len, DelimRun runs[], int max_runs, RefDef *refs, int n_refs) {
     int n = 0;
     size_t pos = 0;
     while (pos < len && n < max_runs) {
@@ -104,7 +148,7 @@ static int collect_delim_runs(const char *text, size_t len, DelimRun runs[], int
                 r->len = run_len;
                 r->used_open = 0;
                 r->used_close = 0;
-                int inside_link = pos_inside_link(text, len, start);
+                int inside_link = pos_inside_link(text, len, start, refs, n_refs);
                 int inside_raw = pos_inside_raw_html_or_autolink(text, len, start);
                 if (inside_link || inside_raw) {
                     r->can_open = 0;
@@ -133,6 +177,110 @@ static int collect_delim_runs(const char *text, size_t len, DelimRun runs[], int
     return n;
 }
 
+static int is_valid_www_autolink(const char *text, size_t len, size_t *consumed) {
+    if (len < 5 || text[0] != 'w' || text[1] != 'w' || text[2] != 'w' || text[3] != '.')
+        return 0;
+
+    size_t pos = 4;
+    int has_dot = 0;
+
+    if (pos >= len || !isalnum((unsigned char)text[pos]))
+        return 0;
+    pos++;
+
+    while (pos < len) {
+        unsigned char c = (unsigned char)text[pos];
+        if (c == '.') {
+            if (!isalnum((unsigned char)text[pos - 1]))
+                return 0;
+            if (pos + 1 >= len || !isalnum((unsigned char)text[pos + 1]))
+                break;
+            has_dot = 1;
+            pos++;
+        } else if (isalnum(c) || c == '-') {
+            pos++;
+        } else {
+            break;
+        }
+    }
+
+    if (!has_dot) return 0;
+
+    size_t domain_len = pos - 4;
+    if (domain_len > 32) return 0;
+
+    while (pos < len) {
+        unsigned char c = (unsigned char)text[pos];
+        if (isalnum(c) || strchr(";?&#=~._-+%!$'()*,/", c)) {
+            pos++;
+        } else {
+            break;
+        }
+    }
+
+    while (pos > 0 && strchr(".-_?=!$'()*+,;&", text[pos - 1]))
+        pos--;
+
+    if (pos <= 4) return 0;
+
+    *consumed = pos;
+    return 1;
+}
+
+static int is_valid_email_autolink_nobracket(const char *text, size_t len, size_t *consumed) {
+    if (len == 0 || len > 254) return 0;
+
+    size_t end = 0;
+    while (end < len) {
+        unsigned char c = (unsigned char)text[end];
+        if (isalnum(c) || c == '.' || c == '%' || c == '+' || c == '-' || c == '_' || c == '@') {
+            end++;
+        } else {
+            break;
+        }
+    }
+
+    while (end > 0 && text[end - 1] == '.')
+        end--;
+
+    size_t scan_len = end;
+    if (scan_len == 0) return 0;
+
+    const char *at = (const char *)memchr(text, '@', scan_len);
+    if (!at) return 0;
+
+    size_t local_len = (size_t)(at - text);
+    size_t domain_len = scan_len - local_len - 1;
+    if (local_len == 0 || domain_len == 0) return 0;
+
+    unsigned char after_at = (unsigned char)text[local_len + 1];
+    if (after_at == '.' || after_at == '-' || after_at == '_' || after_at == '+')
+        return 0;
+
+    if (text[0] == '.') return 0;
+    for (size_t i = 0; i < local_len; i++) {
+        unsigned char c = (unsigned char)text[i];
+        if (!isalnum(c) && c != '.' && c != '%' && c != '+' && c != '-' && c != '_') return 0;
+        if (c == '.' && (i + 1 >= local_len || text[i + 1] == '.')) return 0;
+    }
+
+    const char *domain = at + 1;
+    int has_dot = 0;
+    for (size_t i = 0; i < domain_len; i++) {
+        unsigned char c = (unsigned char)domain[i];
+        if (!isalnum(c) && c != '.' && c != '-') return 0;
+        if (c == '.') {
+            has_dot = 1;
+            if (i == 0 || i + 1 >= domain_len || domain[i + 1] == '.') return 0;
+        }
+    }
+    if (!has_dot) return 0;
+    if (!isalnum((unsigned char)domain[domain_len - 1])) return 0;
+
+    *consumed = scan_len;
+    return 1;
+}
+
 static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, int allow_emphasis, int allow_links, RefDef *refs, int n_refs) {
     DelimRun runs[MAX_RUNS];
     int n_runs = 0;
@@ -141,8 +289,35 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
     EmMatch matches[MAX_MATCHES];
     int n_matches = 0;
 
+    StrikeMatch strike_matches[MAX_STRIKE];
+    int n_strike = 0;
+
     if (allow_emphasis) {
-        n_runs = collect_delim_runs(text, len, runs, MAX_RUNS);
+        n_runs = collect_delim_runs(text, len, runs, MAX_RUNS, refs, n_refs);
+
+        {
+            size_t sp = 0;
+            while (sp + 1 < len && n_strike < MAX_STRIKE) {
+                int found_strike = 0;
+                if (text[sp] == '~' && text[sp + 1] == '~' && !pos_inside_code_span(text, len, sp) && !is_backslash_escaped(text, len, sp)) {
+                    if (sp == 0 || text[sp - 1] != '~') {
+                        size_t cp = sp + 2;
+                        while (cp + 1 < len) {
+                            if (text[cp] == '~' && text[cp + 1] == '~' && !pos_inside_code_span(text, len, cp) && !is_backslash_escaped(text, len, cp)) {
+                                strike_matches[n_strike].opener_pos = sp;
+                                strike_matches[n_strike].closer_pos = cp;
+                                n_strike++;
+                                sp = cp + 2;
+                                found_strike = 1;
+                                break;
+                            }
+                            cp++;
+                        }
+                    }
+                }
+                if (!found_strike) sp++;
+            }
+        }
 
         int stack[MAX_RUNS];
         int sp = 0;
@@ -245,6 +420,25 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
             i += r->len;
             next_run++;
             continue;
+        }
+
+        if (allow_emphasis) {
+            int handled = 0;
+            for (int si = 0; si < n_strike; si++) {
+                if (strike_matches[si].opener_pos == i) {
+                    sb_append(sb, "<del>");
+                    i += 2;
+                    handled = 1;
+                    break;
+                }
+                if (strike_matches[si].closer_pos == i) {
+                    sb_append(sb, "</del>");
+                    i += 2;
+                    handled = 1;
+                    break;
+                }
+            }
+            if (handled) continue;
         }
 
         if (text[i] == '\\' && i + 1 < len) {
@@ -408,17 +602,13 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                         else if (text[r] == ']') { ref_depth--; if (ref_depth == 0) ref_end = r; }
                         r++;
                     }
-                    if (ref_end == 0) ref_end = len;
                     if (ref_end == alt_end + 2) is_collapsed = 1;
-                } else if (alt_end + 1 < len && text[alt_end + 1] == ']') {
-                    ref_end = alt_end + 1;
-                    is_collapsed = 1;
                 } else {
                     ref_end = alt_end;
                     is_collapsed = 1;
                     is_shortcut = 1;
                 }
-                if (ref_end > alt_end + 1 || is_shortcut) {
+                if (ref_end > 0 && (ref_end > alt_end + 1 || is_shortcut)) {
                     RefDef *found = NULL;
                     size_t search_start, search_len;
                     if (is_collapsed) {
@@ -460,6 +650,36 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
             }
             if (text_end > 0 && pos_inside_code_span(text, len, text_end)) text_end = 0;
 
+            if (text_end > 0) {
+                size_t ns = link_start;
+                while (ns < text_end) {
+                    if (text[ns] == '[') {
+                        int nd = 1;
+                        size_t nc = ns + 1;
+                        while (nc < text_end && nd > 0) {
+                            if (text[nc] == '[') nd++;
+                            else if (text[nc] == ']') { nd--; if (nd == 0) break; }
+                            nc++;
+                        }
+                        if (nd == 0 && nc < text_end) {
+                            if (nc + 1 < text_end && text[nc + 1] == '(') {
+                                int pd = 1;
+                                size_t p = nc + 2;
+                                while (p < text_end && pd > 0) {
+                                    if (text[p] == '(') pd++;
+                                    else if (text[p] == ')') pd--;
+                                    if (pd > 0) p++;
+                                }
+                                if (pd == 0) { text_end = 0; break; }
+                            }
+                            if (nc + 1 < text_end && text[nc + 1] == '[') { text_end = 0; break; }
+                            if (nc + 1 < len && nc + 1 <= text_end && text[nc + 1] == ']') { text_end = 0; break; }
+                        }
+                    }
+                    ns++;
+                }
+            }
+
             if (text_end > 0 && text_end + 1 < len && text[text_end + 1] == '(') {
                 size_t paren_start = text_end + 2;
                 size_t k = paren_start;
@@ -500,7 +720,7 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                     }
                 }
             }
-            if (refs && n_refs > 0) {
+            if (text_end > 0 && refs && n_refs > 0) {
                 size_t ref_end = 0;
                 int is_collapsed = 0;
                 int is_shortcut = 0;
@@ -513,17 +733,13 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                         else if (text[r] == ']') { ref_depth--; if (ref_depth == 0) ref_end = r; }
                         r++;
                     }
-                    if (ref_end == 0) ref_end = len;
                     if (ref_end == text_end + 2) is_collapsed = 1;
-                } else if (text_end + 1 < len && text[text_end + 1] == ']') {
-                    ref_end = text_end + 1;
-                    is_collapsed = 1;
                 } else {
                     ref_end = text_end;
                     is_collapsed = 1;
                     is_shortcut = 1;
                 }
-                if (ref_end > text_end || is_shortcut) {
+                if (ref_end > 0 && (ref_end > text_end || is_shortcut)) {
                     RefDef *found = NULL;
                     size_t search_start, search_len;
                     if (is_collapsed || is_shortcut) {
@@ -612,6 +828,29 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
             sb_append(sb, "&lt;");
             i++;
             continue;
+        }
+
+        if (!pos_inside_code_span(text, len, i) && !pos_inside_link(text, len, i, refs, n_refs)) {
+            if (i == 0 || (!isalnum((unsigned char)text[i-1]) && text[i-1] != '.' && text[i-1] != '/')) {
+                size_t www_consumed = 0;
+                if (is_valid_www_autolink(text + i, len - i, &www_consumed)) {
+                    sb_append(sb, "<a href=\"http://");
+                    for (size_t wi = 0; wi < www_consumed; wi++) {
+                        unsigned char c = (unsigned char)(text[i + wi]);
+                        if (c == '&') sb_append(sb, "&amp;");
+                        else sb_append_char(sb, c);
+                    }
+                    sb_append(sb, "\">");
+                    for (size_t wi = 0; wi < www_consumed; wi++) {
+                        unsigned char c = (unsigned char)(text[i + wi]);
+                        if (c == '&') sb_append(sb, "&amp;");
+                        else sb_append_char(sb, c);
+                    }
+                    sb_append(sb, "</a>");
+                    i += www_consumed;
+                    continue;
+                }
+            }
         }
 
         switch (text[i]) {

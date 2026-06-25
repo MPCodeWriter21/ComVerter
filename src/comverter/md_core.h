@@ -10,6 +10,38 @@
 
 #define MAX_LIST_DEPTH 16
 
+/* Bounded string search: like strstr but only searches within the first n bytes */
+static inline const char *nstrstr(const char *haystack, size_t n, const char *needle) {
+    size_t nlen = strlen(needle);
+    if (nlen == 0) return haystack;
+    if (n < nlen) return NULL;
+    size_t max_i = n - nlen;
+    for (size_t i = 0; i <= max_i; i++) {
+        size_t j;
+        for (j = 0; j < nlen; j++) {
+            if (haystack[i + j] != needle[j]) break;
+        }
+        if (j == nlen) return haystack + i;
+    }
+    return NULL;
+}
+
+/* Bounded case-insensitive string search */
+static inline const char *nistrstr(const char *haystack, size_t n, const char *needle) {
+    size_t nlen = strlen(needle);
+    if (nlen == 0) return haystack;
+    if (n < nlen) return NULL;
+    size_t max_i = n - nlen;
+    for (size_t i = 0; i <= max_i; i++) {
+        size_t j;
+        for (j = 0; j < nlen; j++) {
+            if (tolower((unsigned char)haystack[i + j]) != tolower((unsigned char)needle[j])) break;
+        }
+        if (j == nlen) return haystack + i;
+    }
+    return NULL;
+}
+
 typedef struct {
     int type;          /* 1=ul, 2=ol */
     char marker;       /* '-', '+', '*' for ul; 0 for ol */

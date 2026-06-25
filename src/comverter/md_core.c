@@ -617,24 +617,97 @@ void ref_def_free(RefDef *rd) {
     if (rd->title) free(rd->title);
 }
 
+static unsigned long utf8_decode_cp(const char *src, size_t src_len, size_t *pos) {
+    if (*pos >= src_len) return 0;
+    unsigned char c = (unsigned char)src[*pos];
+    if (c <= 0x7F) {
+        (*pos)++;
+        return c;
+    } else if ((c & 0xE0) == 0xC0 && *pos + 1 < src_len) {
+        unsigned long cp = ((unsigned long)(c & 0x1F) << 6) | (unsigned long)(src[*pos + 1] & 0x3F);
+        *pos += 2;
+        return cp;
+    } else if ((c & 0xF0) == 0xE0 && *pos + 2 < src_len) {
+        unsigned long cp = ((unsigned long)(c & 0x0F) << 12) | ((unsigned long)(src[*pos + 1] & 0x3F) << 6) | (unsigned long)(src[*pos + 2] & 0x3F);
+        *pos += 3;
+        return cp;
+    } else if ((c & 0xF8) == 0xF0 && *pos + 3 < src_len) {
+        unsigned long cp = ((unsigned long)(c & 0x07) << 18) | ((unsigned long)(src[*pos + 1] & 0x3F) << 12) | ((unsigned long)(src[*pos + 2] & 0x3F) << 6) | (unsigned long)(src[*pos + 3] & 0x3F);
+        *pos += 4;
+        return cp;
+    }
+    (*pos)++;
+    return c;
+}
+
+static int utf8_encode_cp(unsigned long cp, char *buf) {
+    if (cp <= 0x7F) {
+        buf[0] = (char)cp;
+        return 1;
+    } else if (cp <= 0x7FF) {
+        buf[0] = (char)(0xC0 | (cp >> 6));
+        buf[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    } else if (cp <= 0xFFFF) {
+        buf[0] = (char)(0xE0 | (cp >> 12));
+        buf[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    } else if (cp <= 0x10FFFF) {
+        buf[0] = (char)(0xF0 | (cp >> 18));
+        buf[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+        buf[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[3] = (char)(0x80 | (cp & 0x3F));
+        return 4;
+    }
+    return 0;
+}
+
+static unsigned long unicode_tolower(unsigned long cp) {
+    if (cp >= 'A' && cp <= 'Z') return cp + 0x20;
+    if (cp >= 0xC0 && cp <= 0xD6) return cp + 0x20;
+    if (cp >= 0xD8 && cp <= 0xDE) return cp + 0x20;
+    if (cp >= 0x0391 && cp <= 0x03A1) return cp + 0x20;
+    if (cp >= 0x03A3 && cp <= 0x03A9) return cp + 0x20;
+    if (cp == 0x0386) return 0x03AC;
+    if (cp >= 0x0388 && cp <= 0x038A) return cp + 0x25;
+    if (cp == 0x038C) return 0x03CC;
+    if (cp >= 0x038E && cp <= 0x038F) return cp + 0x40;
+    if (cp == 0x03AA) return 0x03CA;
+    if (cp == 0x03AB) return 0x03CB;
+    if (cp >= 0x0400 && cp <= 0x040F) return cp + 0x50;
+    if (cp >= 0x0410 && cp <= 0x042F) return cp + 0x20;
+    if (cp >= 0x0460 && cp <= 0x0481 && (cp & 1) == 0) return cp + 1;
+    if (cp == 0x0490 || cp == 0x0492 || cp == 0x0494 || cp == 0x0496 || cp == 0x0498) return cp + 1;
+    if (cp == 0x049A || cp == 0x049C || cp == 0x049E || cp == 0x04A0 || cp == 0x04A2) return cp + 1;
+    if (cp == 0x04A4 || cp == 0x04A6 || cp == 0x04A8 || cp == 0x04AA || cp == 0x04AC) return cp + 1;
+    if (cp == 0x04AE || cp == 0x04B0 || cp == 0x04B2 || cp == 0x04B4 || cp == 0x04B6) return cp + 1;
+    if (cp == 0x04B8 || cp == 0x04BA || cp == 0x04BC || cp == 0x04BE) return cp + 1;
+    if (cp == 0x04C1 || cp == 0x04C3 || cp == 0x04C5 || cp == 0x04C7 || cp == 0x04C9) return cp + 1;
+    if (cp == 0x04CB || cp == 0x04CD) return cp + 1;
+    if (cp >= 0x04D0 && cp <= 0x04FF && (cp & 1) == 0) return cp + 1;
+    return cp;
+}
+
 size_t normalize_label(const char *src, size_t src_len, char *dst, size_t dst_cap) {
     size_t j = 0;
     int last_was_space = 1;
-    for (size_t i = 0; i < src_len && j < dst_cap - 1; i++) {
+    size_t i = 0;
+    while (i < src_len && j < dst_cap - 1) {
         unsigned char c = (unsigned char)src[i];
-        if (c == '\\' && i + 1 < src_len) {
-            unsigned char next = (unsigned char)src[i + 1];
-            if (next == ' ' || next == '\t' || next == '\n' || next == '\r') {
-                if (!last_was_space && j > 0) { dst[j++] = ' '; last_was_space = 1; }
-            } else {
-                dst[j++] = (char)tolower(next);
-                last_was_space = 0;
-            }
-            i++;
-        } else if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+        if (c <= 0x7F && (c == ' ' || c == '\t' || c == '\n' || c == '\r')) {
             if (!last_was_space && j > 0) { dst[j++] = ' '; last_was_space = 1; }
+            i++;
         } else {
-            dst[j++] = (char)tolower(c);
+            unsigned long cp = utf8_decode_cp(src, src_len, &i);
+            if (cp == 0x1E9E) {
+                if (j + 2 < dst_cap) { dst[j++] = 's'; dst[j++] = 's'; }
+            } else {
+                cp = unicode_tolower(cp);
+                char buf[5] = {0};
+                int n = utf8_encode_cp(cp, buf);
+                for (int k = 0; k < n && j < dst_cap - 1; k++) { dst[j++] = buf[k]; }
+            }
             last_was_space = 0;
         }
     }
@@ -686,7 +759,7 @@ int parse_ref_def(const char *line, size_t line_len, RefDef *rd) {
     while (i < line_len && (line[i] == ' ' || line[i] == '\t')) i++;
     if (i >= line_len || line[i] != ':') return 0;
     i++;
-    while (i < line_len && (line[i] == ' ' || line[i] == '\t')) i++;
+    while (i < line_len && (line[i] == ' ' || line[i] == '\t' || line[i] == '\n' || line[i] == '\r')) i++;
     if (i >= line_len) return 0;
     size_t dest_start, dest_len;
     int has_angle = (line[i] == '<');
@@ -706,16 +779,18 @@ int parse_ref_def(const char *line, size_t line_len, RefDef *rd) {
             unsigned char c = (unsigned char)line[i];
             if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == 0x0C || c == 0x0B) break;
             if (c == '\\' && i + 1 < line_len && strchr("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", line[i + 1])) { i += 2; continue; }
-            if (c == '(') return 0;
-            if (c == ')') return 0;
             i++;
         }
         dest_len = i - dest_start;
     }
-    while (i < line_len && (line[i] == ' ' || line[i] == '\t')) i++;
+    int has_ws_before_title = 0;
+    while (i < line_len && (line[i] == ' ' || line[i] == '\t')) {
+        has_ws_before_title = 1;
+        i++;
+    }
     size_t title_start = 0, title_len = 0;
     if (i < line_len) {
-        if (line[i] == '"' || line[i] == '\'') {
+        if (has_ws_before_title && (line[i] == '"' || line[i] == '\'')) {
             char delim = line[i]; i++;
             title_start = i;
             while (i < line_len && line[i] != delim)
@@ -724,7 +799,7 @@ int parse_ref_def(const char *line, size_t line_len, RefDef *rd) {
             if (i >= line_len) return 0;
             title_len = i - title_start;
             i++;
-        } else if (line[i] == '(') {
+        } else if (has_ws_before_title && line[i] == '(') {
             i++; title_start = i;
             int pdepth = 1;
             while (i < line_len && pdepth > 0) {
@@ -1713,12 +1788,12 @@ int parse_link_dest_title(const char *text, size_t content_start, size_t content
                 if (pd == 0) pos = match + 1;
                 else break;
             }
-            else if (text[pos] != ' ' && text[pos] != '\t' && text[pos] != '\n' && text[pos] != '\r' && text[pos] != '\f' && text[pos] != '\v' && text[pos] != '"' && text[pos] != '\'' && text[pos] != ')' && text[pos] != '\\') { pos++; }
+            else if (text[pos] != ' ' && text[pos] != '\t' && text[pos] != '\n' && text[pos] != '\r' && text[pos] != '\f' && text[pos] != '\v' && text[pos] != '\'' && text[pos] != ')') { pos++; }
             else { break; }
         }
         *dest_len = pos - *dest_start;
     }
-    while (pos < content_end && (text[pos] == ' ' || text[pos] == '\t')) pos++;
+    while (pos < content_end && (text[pos] == ' ' || text[pos] == '\t' || text[pos] == '\n' || text[pos] == '\r')) pos++;
     if (pos < content_end) {
         if (text[pos] == '"' || text[pos] == '\'') {
             char delim = text[pos];
@@ -1729,7 +1804,6 @@ int parse_link_dest_title(const char *text, size_t content_start, size_t content
                     if (pos > *title_start && text[pos - 1] == '\\') { pos++; continue; }
                     break;
                 }
-                if (text[pos] == '\n' || text[pos] == '\r') return 0;
                 pos++;
             }
             if (pos >= content_end) return 0;
@@ -1765,6 +1839,8 @@ int collect_refs(const char *markdown, size_t md_len, RefDef **out_refs, int *ou
     int in_indented_code = 0;
     int in_html_block = 0;
     int html_block_type = 0;
+    int in_paragraph = 0;
+    int last_was_ref_def = 0;
 
     while (p < end) {
         const char *line_end = p;
@@ -1776,9 +1852,15 @@ int collect_refs(const char *markdown, size_t md_len, RefDef **out_refs, int *ou
         }
         size_t trimmed_len = trim_trailing(line, line_len);
 
+        if (trimmed_len == 0) {
+            in_paragraph = 0;
+            last_was_ref_def = 0;
+        }
+
         if (in_fence) {
             if (is_fence_end(line, trimmed_len, fence_char, fence_len))
                 in_fence = 0;
+            last_was_ref_def = 0;
             p = line_end + 1;
             continue;
         }
@@ -1802,50 +1884,205 @@ int collect_refs(const char *markdown, size_t md_len, RefDef **out_refs, int *ou
                 if (html_block_type == 1) {
                     const char *closes[] = {"</pre>", "</script>", "</style>", "</textarea>"};
                     for (int ci = 0; ci < 4 && !closed; ci++) {
-                        const char *f = strstr(line, closes[ci]);
-                        if (!f) {
-                            char upper[32];
-                            size_t ul = strlen(closes[ci]);
-                            if (ul < sizeof(upper)) {
-                                for (size_t ui = 0; ui < ul; ui++) upper[ui] = toupper((unsigned char)closes[ci][ui]);
-                                upper[ul] = 0;
-                                f = strstr(line, upper);
-                            }
-                        }
+                        const char *f = nstrstr(line, trimmed_len, closes[ci]);
+                        if (!f) f = nistrstr(line, trimmed_len, closes[ci]);
                         if (f) closed = 1;
                     }
-                } else if (html_block_type == 2) { if (strstr(line, "-->")) closed = 1; }
-                else if (html_block_type == 3) { if (strstr(line, "?>")) closed = 1; }
+                } else if (html_block_type == 2) { if (nstrstr(line, trimmed_len, "-->")) closed = 1; }
+                else if (html_block_type == 3) { if (nstrstr(line, trimmed_len, "?>")) closed = 1; }
                 else if (html_block_type == 4) { for (size_t ci = 0; ci < trimmed_len; ci++) { if (line[ci] == '>') { closed = 1; break; } } }
-                else if (html_block_type == 5) { if (strstr(line, "]]>")) closed = 1; }
+                else if (html_block_type == 5) { if (nstrstr(line, trimmed_len, "]]>")) closed = 1; }
                 if (closed) in_html_block = 0;
             }
+            last_was_ref_def = 0;
             p = line_end + 1;
             continue;
         }
+        int parsed_as_ref = 0;
         if (!in_fence && !in_indented_code && !in_html_block) {
-            if (!in_html_block && trimmed_len > 0) {
+            const char *ref_line = line;
+            size_t ref_line_len = line_len;
+            if (trimmed_len > 0) {
                 size_t bq_indent = 0;
                 while (bq_indent < trimmed_len && bq_indent < 3 && line[bq_indent] == ' ') bq_indent++;
                 if (bq_indent < trimmed_len && line[bq_indent] == '>') {
-                    p = line_end + 1;
-                    continue;
+                    size_t after = bq_indent + 1;
+                    if (after < trimmed_len && line[after] == ' ') after++;
+                    ref_line = line + after;
+                    ref_line_len = line_len > after ? line_len - after : 0;
                 }
             }
-            RefDef rd;
-            if (parse_ref_def(line, line_len, &rd)) {
-                RefDef *existing = NULL;
-                if (!find_ref(refs, n_refs, rd.label, rd.label_len, &existing)) {
-                    if (n_refs >= cap_refs) {
-                        int new_cap = cap_refs ? cap_refs * 2 : 8;
-                        RefDef *new_refs = (RefDef *)realloc(refs, new_cap * sizeof(RefDef));
-                        if (!new_refs) { ref_def_free(&rd); continue; }
-                        refs = new_refs;
-                        cap_refs = new_cap;
+            if (!in_paragraph) {
+                RefDef rd;
+                if (parse_ref_def(ref_line, ref_line_len, &rd)) {
+                    parsed_as_ref = 1;
+                    last_was_ref_def = 1;
+                    int title_on_next = 0;
+                    const char *nl = line_end + 1;
+                    const char *nl_end = NULL;
+                    if (!rd.title) {
+                        if (nl < end && *nl == '\r') {
+                            if (nl + 1 < end && *(nl + 1) == '\n') nl++;
+                        }
+                        if (nl < end && (*nl == '\n' || *nl == '\r')) nl++;
+                        nl_end = nl;
+                        while (nl_end < end && *nl_end != '\n' && *nl_end != '\r') nl_end++;
+                        size_t nl_len = nl_end - nl;
+                        size_t nl_trimmed = trim_trailing(nl, nl_len);
+                        if (nl_trimmed > 0) {
+                            size_t nl_ind = 0;
+                            while (nl_ind < nl_trimmed && nl[nl_ind] == ' ') nl_ind++;
+                            if (nl_ind < nl_trimmed) {
+                                const char *nc = nl + nl_ind;
+                                size_t ncl = nl_trimmed - nl_ind;
+                                if (ncl >= 2 && (nc[0] == '"' || nc[0] == '\'') && nc[ncl - 1] == nc[0]) {
+                                    rd.title = (char *)malloc(ncl - 1);
+                                    if (rd.title) {
+                                        memcpy(rd.title, nc + 1, ncl - 2);
+                                        rd.title[ncl - 2] = '\0';
+                                        title_on_next = 1;
+                                    }
+                                }
+                            }
+                        }
                     }
-                    refs[n_refs++] = rd;
-                } else { ref_def_free(&rd); }
+                    RefDef *existing = NULL;
+                    if (!find_ref(refs, n_refs, rd.label, rd.label_len, &existing)) {
+                        if (n_refs >= cap_refs) {
+                            int new_cap = cap_refs ? cap_refs * 2 : 8;
+                            RefDef *new_refs = (RefDef *)realloc(refs, new_cap * sizeof(RefDef));
+                            if (!new_refs) { ref_def_free(&rd); continue; }
+                            refs = new_refs;
+                            cap_refs = new_cap;
+                        }
+                        refs[n_refs++] = rd;
+                    } else { ref_def_free(&rd); }
+                    if (title_on_next) {
+                        p = nl_end;
+                        if (nl_end < end && *nl_end == '\r') {
+                            if (nl_end + 1 < end && *(nl_end + 1) == '\n') p = nl_end + 2;
+                            else p = nl_end + 1;
+                        } else if (nl_end < end && *nl_end == '\n') {
+                            p = nl_end + 1;
+                        }
+                        continue;
+                    }
+                } else if (trimmed_len > 0 && ref_line_len >= 1) {
+                    size_t s = 0;
+                    while (s < ref_line_len && s < 3 && ref_line[s] == ' ') s++;
+                    if (s < ref_line_len && ref_line[s] == '[') {
+                        char accum[8192];
+                        size_t alen = ref_line_len;
+                        if (alen >= sizeof(accum)) alen = sizeof(accum) - 1;
+                        memcpy(accum, ref_line, alen);
+                        const char *scan = line_end;
+                        const char *last_line_end = line_end;
+                        int accum_success = 0;
+                        while (scan < end) {
+                            RefDef rd_accum;
+                            if (parse_ref_def(accum, alen, &rd_accum)) {
+                                parsed_as_ref = 1;
+                                last_was_ref_def = 1;
+                                const char *title_line_end = NULL;
+                                int title_on_next = 0;
+                                if (!rd_accum.title) {
+                                    const char *nl2 = last_line_end;
+                                    if (nl2 < end && *nl2 == '\r') {
+                                        if (nl2 + 1 < end && *(nl2 + 1) == '\n') nl2++;
+                                    }
+                                    if (nl2 < end && (*nl2 == '\n' || *nl2 == '\r')) nl2++;
+                                    const char *nl2_end = nl2;
+                                    while (nl2_end < end && *nl2_end != '\n' && *nl2_end != '\r') nl2_end++;
+                                    size_t nl2_len = nl2_end - nl2;
+                                    size_t nl2_trimmed = trim_trailing(nl2, nl2_len);
+                                    if (nl2_trimmed > 0) {
+                                        size_t nl2_ind = 0;
+                                        while (nl2_ind < nl2_trimmed && nl2[nl2_ind] == ' ') nl2_ind++;
+                                        if (nl2_ind < nl2_trimmed) {
+                                            const char *nc2 = nl2 + nl2_ind;
+                                            size_t ncl2 = nl2_trimmed - nl2_ind;
+                                            if (ncl2 >= 2 && (nc2[0] == '"' || nc2[0] == '\'') && nc2[ncl2 - 1] == nc2[0]) {
+                                                rd_accum.title = (char *)malloc(ncl2 - 1);
+                                                if (rd_accum.title) {
+                                                    memcpy(rd_accum.title, nc2 + 1, ncl2 - 2);
+                                                    rd_accum.title[ncl2 - 2] = '\0';
+                                                    title_on_next = 1;
+                                                    title_line_end = nl2_end;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if (title_on_next && title_line_end) {
+                                    p = title_line_end;
+                                    if (title_line_end < end && *title_line_end == '\r') {
+                                        if (title_line_end + 1 < end && *(title_line_end + 1) == '\n') p = title_line_end + 2;
+                                        else p = title_line_end + 1;
+                                    } else if (title_line_end < end && *title_line_end == '\n') {
+                                        p = title_line_end + 1;
+                                    }
+                                } else {
+                                    p = last_line_end;
+                                    if (last_line_end < end && *last_line_end == '\r') {
+                                        if (last_line_end + 1 < end && *(last_line_end + 1) == '\n') p = last_line_end + 2;
+                                        else p = last_line_end + 1;
+                                    } else if (last_line_end < end && *last_line_end == '\n') {
+                                        p = last_line_end + 1;
+                                    }
+                                }
+                                RefDef *existing = NULL;
+                                if (!find_ref(refs, n_refs, rd_accum.label, rd_accum.label_len, &existing)) {
+                                    if (n_refs >= cap_refs) {
+                                        int new_cap = cap_refs ? cap_refs * 2 : 8;
+                                        RefDef *new_refs = (RefDef *)realloc(refs, new_cap * sizeof(RefDef));
+                                        if (!new_refs) { ref_def_free(&rd_accum); break; }
+                                        refs = new_refs;
+                                        cap_refs = new_cap;
+                                    }
+                                    refs[n_refs++] = rd_accum;
+                                } else { ref_def_free(&rd_accum); }
+                                accum_success = 1;
+                                break;
+                            }
+                            if (scan >= end) break;
+                            if (*scan == '\r') {
+                                scan++;
+                                if (scan < end && *scan == '\n') scan++;
+                            } else if (*scan == '\n') {
+                                scan++;
+                            } else { break; }
+                            const char *next_start = scan;
+                            const char *next_end = next_start;
+                            while (next_end < end && *next_end != '\n' && *next_end != '\r') next_end++;
+                            size_t next_trimmed = trim_trailing(next_start, next_end - next_start);
+                            if (next_trimmed == 0) break;
+                            size_t add_len = next_end - next_start;
+                            if (alen + 1 + add_len >= sizeof(accum)) break;
+                            accum[alen++] = '\n';
+                            memcpy(accum + alen, next_start, add_len);
+                            alen += add_len;
+                            scan = next_end;
+                            last_line_end = next_end;
+                        }
+                        if (accum_success) continue;
+                    }
+                }
             }
+            if (!parsed_as_ref && trimmed_len > 0 && ref_line == line && !last_was_ref_def) {
+                char fc = 0;
+                int fl = 0, fi = 0;
+                int is_atx = is_atx_heading(line, trimmed_len);
+                int is_hr = is_thematic_break(line, trimmed_len);
+                int is_setext = is_setext_underline(line, trimmed_len);
+                int is_fence = is_fence_start(line, trimmed_len, &fc, &fl, &fi, NULL, NULL);
+                int is_html = (line[0] == '<' && is_html_block_start(line, trimmed_len));
+                if (!is_atx && !is_hr && !is_setext && !is_fence && !is_html) {
+                    in_paragraph = 1;
+                }
+            }
+        }
+        if (!parsed_as_ref) {
+            last_was_ref_def = 0;
         }
         /* Check for fence start or html block start */
         if (!in_fence && !in_indented_code && !in_html_block && trimmed_len > 0) {

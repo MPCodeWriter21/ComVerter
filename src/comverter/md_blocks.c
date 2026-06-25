@@ -44,8 +44,10 @@ size_t atx_content_end(const char *line, size_t len) {
 }
 
 int is_table_row(const char *line, size_t len) {
-    for (size_t i = 0; i < len; i++)
+    for (size_t i = 0; i < len; i++) {
+        if (line[i] == '\\' && i + 1 < len && line[i + 1] == '|') { i++; continue; }
         if (line[i] == '|') return 1;
+    }
     return 0;
 }
 
@@ -63,6 +65,21 @@ int is_table_separator(const char *line, size_t len) {
         return 0;
     }
     return has_pipe && has_dash;
+}
+
+/* Unescape \| -> | in a table cell's content (before inline rendering) */
+static size_t unescape_cell_content(char *dst, size_t dst_cap, const char *src, size_t src_len) {
+    size_t j = 0;
+    for (size_t i = 0; i < src_len && j < dst_cap - 1; i++) {
+        if (src[i] == '\\' && i + 1 < src_len && src[i + 1] == '|') {
+            dst[j++] = '|';
+            i++;
+        } else {
+            dst[j++] = src[i];
+        }
+    }
+    dst[j] = '\0';
+    return j;
 }
 
 int is_setext_underline(const char *line, size_t len) {
@@ -301,6 +318,20 @@ void process_list_content(StringBuilder *sb, StringBuilder *li_content, ListEntr
             sb_append(sb, "<hr />\n");
             return;
         }
+        /* Check for HTML block inside list item */
+        {
+            int li_hb = is_html_block_start(content, content_len);
+            if (li_hb > 0) {
+                ListEntry *cur = list_top(stack, *depth);
+                if (cur && cur->item_open) {
+                    list_flush_content(sb, li_content, cur);
+                    if (sb->len == 0 || sb->data[sb->len - 1] != '\n') sb_append_char(sb, '\n');
+                }
+                sb_append_n(sb, content, content_len);
+                sb_append_char(sb, '\n');
+                return;
+            }
+        }
         if (content[0] == '#') {
             size_t hp = 0;
             int hlevel = 0;
@@ -342,6 +373,7 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
     int fence_in_blockquote = 0;
     int in_blockquote = 0;
     int bq_has_content = 0;
+    int bq_in_html_block = 0;
     int in_indented_code = 0;
     int code_pending_newlines = 0;
     int in_html_block = 0;
@@ -454,7 +486,7 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
             }
         }
 
-        if (!in_blockquote && list_depth == 0 && trimmed_len > 0 && !para_has_content && !in_indented_code) {
+        if (!in_html_block && !in_blockquote && list_depth == 0 && trimmed_len > 0 && !para_has_content && !in_indented_code) {
             size_t indent_col = get_indent_tab(line, line_len);
             if (indent_col >= 4) {
                 in_indented_code = 1;
@@ -505,10 +537,6 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                 while (sep_end < end && *sep_end != '\n' && *sep_end != '\r') sep_end++;
                 size_t sep_len = sep_end - next_line;
                 if (is_table_separator(next_line, sep_len)) {
-                    int n_cols = 0;
-                    for (size_t ci = 0; ci < sep_len; ci++) if (next_line[ci] == '|') n_cols++;
-                    if (n_cols == 0) n_cols = 1; else n_cols--;
-
                     char align[64];
                     int n_align = 0;
                     {
@@ -530,33 +558,60 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                         }
                         n_align = cell_idx;
                     }
+                    int n_cols = n_align;
+
+                    int hdr_cells = 0;
+                    {
+                        size_t ci = 0;
+                        while (ci < trimmed_len) {
+                            while (ci < trimmed_len && (line[ci] == ' ' || line[ci] == '|')) ci++;
+                            if (ci >= trimmed_len) break;
+                            size_t cell_start = ci;
+                            while (ci < trimmed_len && !(line[ci] == '|' && (ci == 0 || line[ci - 1] != '\\'))) ci++;
+                            if (ci > cell_start && hdr_cells < 64) hdr_cells++;
+                            if (ci >= trimmed_len) break;
+                            ci++;
+                        }
+                    }
+                    if (hdr_cells > n_cols) goto not_a_table;
 
                     sb_append(sb, "<table>\n<thead>\n<tr>\n");
                     {
                         size_t ci = 0;
                         int cell_idx = 0;
-                        while (ci < trimmed_len) {
-                            while (ci < trimmed_len && (line[ci] == ' ' || line[ci] == ' ' || line[ci] == '|')) ci++;
+                        while (ci < trimmed_len && cell_idx < n_cols) {
+                            while (ci < trimmed_len && (line[ci] == ' ' || line[ci] == '|')) ci++;
+                            if (ci >= trimmed_len) break;
                             size_t cell_start = ci;
-                            while (ci < trimmed_len && line[ci] != '|') ci++;
+                            while (ci < trimmed_len && !(line[ci] == '|' && (ci == 0 || line[ci - 1] != '\\'))) ci++;
+                            if (ci == cell_start) break;
                             size_t cell_end = ci;
                             while (cell_end > cell_start && line[cell_end - 1] == ' ') cell_end--;
                             while (cell_start < cell_end && line[cell_start] == ' ') cell_start++;
-                            if (cell_end > cell_start && cell_idx < 64) {
+                            if (cell_end > cell_start) {
+                                char cell_buf[4096];
+                                size_t cell_len = unescape_cell_content(cell_buf, sizeof(cell_buf), line + cell_start, cell_end - cell_start);
                                 sb_append(sb, "<th");
                                 if (cell_idx < n_align && align[cell_idx] == 'l') sb_append(sb, " align=\"left\"");
                                 else if (cell_idx < n_align && align[cell_idx] == 'c') sb_append(sb, " align=\"center\"");
                                 else if (cell_idx < n_align && align[cell_idx] == 'r') sb_append(sb, " align=\"right\"");
                                 sb_append(sb, ">");
-                                render_inline(sb, line + cell_start, cell_end - cell_start, 1, 1, refs, n_refs);
+                                render_inline(sb, cell_buf, cell_len, 1, 1, refs, n_refs);
                                 sb_append(sb, "</th>\n");
-                                cell_idx++;
+                            } else {
+                                sb_append(sb, "<th></th>\n");
                             }
+                            cell_idx++;
                             if (ci >= trimmed_len) break;
                             ci++;
                         }
+                        while (cell_idx < n_cols) {
+                            sb_append(sb, "<th></th>\n");
+                            cell_idx++;
+                        }
                     }
-                    sb_append(sb, "</tr>\n</thead>\n<tbody>\n");
+                    sb_append(sb, "</tr>\n</thead>\n");
+                    int has_body = 0;
 
                     p = sep_end + 1;
                     if (sep_end < end && *sep_end == '\r') {
@@ -568,30 +623,49 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                         size_t bline_len = bline_end - p;
                         size_t btrimmed = trim_trailing(p, bline_len);
                         if (btrimmed == 0) break;
-                        if (!is_table_row(p, btrimmed)) break;
+                        {
+                            size_t ws = 0;
+                            while (ws < btrimmed && p[ws] == ' ') ws++;
+                            if (ws < btrimmed && p[ws] == '>') break;
+                        }
+
+                        if (!has_body) {
+                            sb_append(sb, "<tbody>\n");
+                            has_body = 1;
+                        }
 
                         sb_append(sb, "<tr>\n");
                         size_t ci = 0;
                         int cell_idx = 0;
-                        while (ci < btrimmed) {
+                        while (ci < btrimmed && cell_idx < n_cols) {
                             while (ci < btrimmed && (p[ci] == ' ' || p[ci] == '|')) ci++;
+                            if (ci >= btrimmed) break;
                             size_t cell_start = ci;
-                            while (ci < btrimmed && p[ci] != '|') ci++;
+                            while (ci < btrimmed && !(p[ci] == '|' && (ci == 0 || p[ci - 1] != '\\'))) ci++;
+                            if (ci == cell_start) break;
                             size_t cell_end = ci;
                             while (cell_end > cell_start && p[cell_end - 1] == ' ') cell_end--;
                             while (cell_start < cell_end && p[cell_start] == ' ') cell_start++;
-                            if (cell_end > cell_start && cell_idx < 64) {
+                            if (cell_end > cell_start) {
+                                char cell_buf[4096];
+                                size_t cell_len = unescape_cell_content(cell_buf, sizeof(cell_buf), p + cell_start, cell_end - cell_start);
                                 sb_append(sb, "<td");
                                 if (cell_idx < n_align && align[cell_idx] == 'l') sb_append(sb, " align=\"left\"");
                                 else if (cell_idx < n_align && align[cell_idx] == 'c') sb_append(sb, " align=\"center\"");
                                 else if (cell_idx < n_align && align[cell_idx] == 'r') sb_append(sb, " align=\"right\"");
                                 sb_append(sb, ">");
-                                render_inline(sb, p + cell_start, cell_end - cell_start, 1, 1, refs, n_refs);
+                                render_inline(sb, cell_buf, cell_len, 1, 1, refs, n_refs);
                                 sb_append(sb, "</td>\n");
-                                cell_idx++;
+                            } else {
+                                sb_append(sb, "<td></td>\n");
                             }
+                            cell_idx++;
                             if (ci >= btrimmed) break;
                             ci++;
+                        }
+                        while (cell_idx < n_cols) {
+                            sb_append(sb, "<td></td>\n");
+                            cell_idx++;
                         }
                         sb_append(sb, "</tr>\n");
                         p = bline_end + 1;
@@ -599,10 +673,12 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                             if (bline_end + 1 < end && *(bline_end + 1) == '\n') p = bline_end + 2;
                         }
                     }
-                    sb_append(sb, "</tbody>\n</table>\n");
+                    if (has_body) sb_append(sb, "</tbody>\n");
+                    sb_append(sb, "</table>\n");
                     continue;
                 }
             }
+        not_a_table:;
         }
 
         if (in_html_block) {
@@ -617,22 +693,14 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                 if (html_block_type == 1) {
                     const char *closes[] = {"</pre>", "</script>", "</style>", "</textarea>"};
                     for (int ci = 0; ci < 4 && !closed; ci++) {
-                        const char *found = strstr(line, closes[ci]);
-                        if (!found) {
-                            char upper[32];
-                            size_t ul = strlen(closes[ci]);
-                            if (ul < sizeof(upper)) {
-                                for (size_t ui = 0; ui < ul; ui++) upper[ui] = toupper((unsigned char)closes[ci][ui]);
-                                upper[ul] = '\0';
-                                found = strstr(line, upper);
-                            }
-                        }
+                        const char *found = nstrstr(line, trimmed_len, closes[ci]);
+                        if (!found) found = nistrstr(line, trimmed_len, closes[ci]);
                         if (found) closed = 1;
                     }
-                } else if (html_block_type == 2) { if (strstr(line, "-->")) closed = 1; }
-                else if (html_block_type == 3) { if (strstr(line, "?>")) closed = 1; }
+                } else if (html_block_type == 2) { if (nstrstr(line, trimmed_len, "-->")) closed = 1; }
+                else if (html_block_type == 3) { if (nstrstr(line, trimmed_len, "?>")) closed = 1; }
                 else if (html_block_type == 4) { for (size_t ci = 0; ci < trimmed_len; ci++) { if (line[ci] == '>') { closed = 1; break; } } }
-                else if (html_block_type == 5) { if (strstr(line, "]]>")) closed = 1; }
+                else if (html_block_type == 5) { if (nstrstr(line, trimmed_len, "]]>")) closed = 1; }
                 if (closed) in_html_block = 0;
             }
             p = line_end + 1;
@@ -650,7 +718,17 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                 para_buf->len = 0;
                 para_buf->data[0] = '\0';
             }
-            if (in_blockquote) bq_has_content = 0;
+            if (in_blockquote) {
+                bq_in_html_block = 0;
+                if (bq_has_content) {
+                    sb_append(sb, "<p>");
+                    render_inline(sb, para_buf->data, para_buf->len, 1, 1, refs, n_refs);
+                    sb_append(sb, "</p>\n");
+                    bq_has_content = 0;
+                    para_buf->len = 0;
+                    para_buf->data[0] = '\0';
+                }
+            }
             if (list_depth > 0) {
                 ListEntry *cur = list_top(list_stack, list_depth);
                 cur->after_blank = 1;
@@ -662,6 +740,34 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
         if (!para_has_content && !in_blockquote && list_depth == 0 && !in_fence && !in_indented_code) {
             RefDef rd;
             if (parse_ref_def(line, line_len, &rd)) {
+                int title_on_next = 0;
+                if (!rd.title) {
+                    const char *nl = line_end + 1;
+                    if (nl < end && *nl == '\r') {
+                        if (nl + 1 < end && *(nl + 1) == '\n') nl++;
+                    }
+                    if (nl < end && (*nl == '\n' || *nl == '\r')) nl++;
+                    const char *nl_end = nl;
+                    while (nl_end < end && *nl_end != '\n' && *nl_end != '\r') nl_end++;
+                    size_t nl_len = nl_end - nl;
+                    size_t nl_trimmed = trim_trailing(nl, nl_len);
+                    if (nl_trimmed > 0) {
+                        size_t nl_ind = 0;
+                        while (nl_ind < nl_trimmed && nl[nl_ind] == ' ') nl_ind++;
+                        if (nl_ind < nl_trimmed) {
+                            const char *nc = nl + nl_ind;
+                            size_t ncl = nl_trimmed - nl_ind;
+                            if (ncl >= 2 && (nc[0] == '"' || nc[0] == '\'') && nc[ncl - 1] == nc[0]) {
+                                rd.title = (char *)malloc(ncl - 1);
+                                if (rd.title) {
+                                    memcpy(rd.title, nc + 1, ncl - 2);
+                                    rd.title[ncl - 2] = '\0';
+                                    title_on_next = 1;
+                                }
+                            }
+                        }
+                    }
+                }
                 RefDef *existing = NULL;
                 if (!find_ref(refs, n_refs, rd.label, rd.label_len, &existing)) {
                     if (n_refs >= cap_refs) {
@@ -672,8 +778,120 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                     if (n_refs < cap_refs) refs[n_refs++] = rd;
                     else ref_def_free(&rd);
                 } else { ref_def_free(&rd); }
-                p = line_end + 1;
+                if (title_on_next) {
+                    const char *nl_end = line_end + 1;
+                    if (nl_end < end && *nl_end == '\r') {
+                        if (nl_end + 1 < end && *(nl_end + 1) == '\n') nl_end++;
+                    }
+                    if (nl_end < end && (*nl_end == '\n' || *nl_end == '\r')) nl_end++;
+                    while (nl_end < end && *nl_end != '\n' && *nl_end != '\r') nl_end++;
+                    p = nl_end;
+                    if (nl_end < end && *nl_end == '\r') {
+                        if (nl_end + 1 < end && *(nl_end + 1) == '\n') p = nl_end + 2;
+                        else p = nl_end + 1;
+                    } else if (nl_end < end && *nl_end == '\n') {
+                        p = nl_end + 1;
+                    }
+                } else {
+                    p = line_end + 1;
+                }
                 continue;
+            } else if (trimmed_len > 0 && line_len >= 1) {
+                size_t s = 0;
+                while (s < line_len && s < 3 && line[s] == ' ') s++;
+                if (s < line_len && line[s] == '[') {
+                    char accum[8192];
+                    size_t alen = line_len;
+                    if (alen >= sizeof(accum)) alen = sizeof(accum) - 1;
+                    memcpy(accum, line, alen);
+                    const char *scan = line_end;
+                    const char *last_line_end = line_end;
+                    int accum_success = 0;
+                    while (scan < end) {
+                        RefDef rd_accum;
+                        if (parse_ref_def(accum, alen, &rd_accum)) {
+                            int title_on_next = 0;
+                            const char *title_line_end = NULL;
+                            if (!rd_accum.title) {
+                                const char *nl2 = last_line_end;
+                                if (nl2 < end && *nl2 == '\r') {
+                                    if (nl2 + 1 < end && *(nl2 + 1) == '\n') nl2++;
+                                }
+                                if (nl2 < end && (*nl2 == '\n' || *nl2 == '\r')) nl2++;
+                                const char *nl2_end = nl2;
+                                while (nl2_end < end && *nl2_end != '\n' && *nl2_end != '\r') nl2_end++;
+                                size_t nl2_len = nl2_end - nl2;
+                                size_t nl2_trimmed = trim_trailing(nl2, nl2_len);
+                                if (nl2_trimmed > 0) {
+                                    size_t nl2_ind = 0;
+                                    while (nl2_ind < nl2_trimmed && nl2[nl2_ind] == ' ') nl2_ind++;
+                                    if (nl2_ind < nl2_trimmed) {
+                                        const char *nc2 = nl2 + nl2_ind;
+                                        size_t ncl2 = nl2_trimmed - nl2_ind;
+                                        if (ncl2 >= 2 && (nc2[0] == '"' || nc2[0] == '\'') && nc2[ncl2 - 1] == nc2[0]) {
+                                            rd_accum.title = (char *)malloc(ncl2 - 1);
+                                            if (rd_accum.title) {
+                                                memcpy(rd_accum.title, nc2 + 1, ncl2 - 2);
+                                                rd_accum.title[ncl2 - 2] = '\0';
+                                                title_on_next = 1;
+                                                title_line_end = nl2_end;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if (title_on_next && title_line_end) {
+                                p = title_line_end;
+                                if (title_line_end < end && *title_line_end == '\r') {
+                                    if (title_line_end + 1 < end && *(title_line_end + 1) == '\n') p = title_line_end + 2;
+                                    else p = title_line_end + 1;
+                                } else if (title_line_end < end && *title_line_end == '\n') {
+                                    p = title_line_end + 1;
+                                }
+                            } else {
+                                p = last_line_end;
+                                if (last_line_end < end && *last_line_end == '\r') {
+                                    if (last_line_end + 1 < end && *(last_line_end + 1) == '\n') p = last_line_end + 2;
+                                    else p = last_line_end + 1;
+                                } else if (last_line_end < end && *last_line_end == '\n') {
+                                    p = last_line_end + 1;
+                                }
+                            }
+                            RefDef *existing = NULL;
+                            if (!find_ref(refs, n_refs, rd_accum.label, rd_accum.label_len, &existing)) {
+                                if (n_refs >= cap_refs) {
+                                    int new_cap = cap_refs ? cap_refs * 2 : 8;
+                                    RefDef *new_refs = (RefDef *)realloc(refs, new_cap * sizeof(RefDef));
+                                    if (new_refs) { refs = new_refs; cap_refs = new_cap; }
+                                }
+                                if (n_refs < cap_refs) refs[n_refs++] = rd_accum;
+                                else ref_def_free(&rd_accum);
+                            } else { ref_def_free(&rd_accum); }
+                            accum_success = 1;
+                            break;
+                        }
+                        if (scan >= end) break;
+                        if (*scan == '\r') {
+                            scan++;
+                            if (scan < end && *scan == '\n') scan++;
+                        } else if (*scan == '\n') {
+                            scan++;
+                        } else { break; }
+                        const char *next_start = scan;
+                        const char *next_end = next_start;
+                        while (next_end < end && *next_end != '\n' && *next_end != '\r') next_end++;
+                        size_t next_trimmed = trim_trailing(next_start, next_end - next_start);
+                        if (next_trimmed == 0) break;
+                        size_t add_len = next_end - next_start;
+                        if (alen + 1 + add_len >= sizeof(accum)) break;
+                        accum[alen++] = '\n';
+                        memcpy(accum + alen, next_start, add_len);
+                        alen += add_len;
+                        scan = next_end;
+                        last_line_end = next_end;
+                    }
+                    if (accum_success) continue;
+                }
             }
         }
 
@@ -684,6 +902,21 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                 html_block_type = hb_type;
                 sb_append_n(sb, line, line_len);
                 sb_append_char(sb, '\n');
+                if (hb_type <= 5) {
+                    int closed = 0;
+                    if (hb_type == 1) {
+                        const char *closes[] = {"</pre>", "</script>", "</style>", "</textarea>"};
+                        for (int ci = 0; ci < 4 && !closed; ci++) {
+                            const char *found = nstrstr(line, trimmed_len, closes[ci]);
+                            if (!found) found = nistrstr(line, trimmed_len, closes[ci]);
+                            if (found) closed = 1;
+                        }
+                    } else if (hb_type == 2) { if (nstrstr(line, trimmed_len, "-->")) closed = 1; }
+                    else if (hb_type == 3) { if (nstrstr(line, trimmed_len, "?>")) closed = 1; }
+                    else if (hb_type == 4) { for (size_t ci = 0; ci < trimmed_len; ci++) { if (line[ci] == '>') { closed = 1; break; } } }
+                    else if (hb_type == 5) { if (nstrstr(line, trimmed_len, "]]>")) closed = 1; }
+                    if (closed) in_html_block = 0;
+                }
                 p = line_end + 1;
                 continue;
             }
@@ -703,27 +936,35 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                 size_t ds = d_start;
                 while (ds < trimmed_len && isdigit((unsigned char)line[ds])) { num = num * 10 + (line[ds] - '0'); ds++; }
                 if (num > 0 && ds < trimmed_len && line[ds] == '.' && ds + 1 < trimmed_len && line[ds + 1] == ' ') is_ol = 1;
-                if (!is_ol && !is_atx_heading(line, trimmed_len) && !is_thematic_break(line, trimmed_len)) {
+                char fence_dc; int fence_dl, fence_di; const char *fence_di2; size_t fence_dil;
+                int bq_is_fence = is_fence_start(line, trimmed_len, &fence_dc, &fence_dl, &fence_di, &fence_di2, &fence_dil);
+                if (!is_ol && !is_atx_heading(line, trimmed_len) && !is_thematic_break(line, trimmed_len) && !bq_is_fence) {
                     if (bq_has_content) {
+                        /* Lazy continuation: line is part of the blockquote paragraph */
                         sb_append_char(para_buf, '\n');
                         const char *lc = line;
                         size_t lcl = trimmed_len;
                         while (lcl > 0 && (*lc == ' ' || *lc == '\t')) { lc++; lcl--; }
                         sb_append_n(para_buf, lc, lcl);
+                        p = line_end + 1;
+                        continue;
                     }
-                    p = line_end + 1;
-                    continue;
+                    /* No open blockquote content: close the blockquote
+                       and let this line be processed normally */
+                    sb_append(sb, "</blockquote>\n");
+                    in_blockquote = 0;
+                } else {
+                    if (bq_has_content) {
+                        sb_append(sb, "<p>");
+                        render_inline(sb, para_buf->data, para_buf->len, 1, 1, refs, n_refs);
+                        sb_append(sb, "</p>\n");
+                        bq_has_content = 0;
+                        para_buf->len = 0;
+                        para_buf->data[0] = '\0';
+                    }
+                    sb_append(sb, "</blockquote>\n");
+                    in_blockquote = 0;
                 }
-                if (bq_has_content) {
-                    sb_append(sb, "<p>");
-                    render_inline(sb, para_buf->data, para_buf->len, 1, 1, refs, n_refs);
-                    sb_append(sb, "</p>\n");
-                    bq_has_content = 0;
-                    para_buf->len = 0;
-                    para_buf->data[0] = '\0';
-                }
-                sb_append(sb, "</blockquote>\n");
-                in_blockquote = 0;
             }
         }
 
@@ -741,11 +982,26 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
         }
 
         if (is_blockquote_line) {
+            if (bq_in_html_block) {
+                /* Strip the blockquote prefix (> or > ) for HTML block content */
+                size_t bq_skip = 0;
+                while (bq_skip < trimmed_len && bq_skip < 3 && line[bq_skip] == ' ') bq_skip++;
+                if (bq_skip < trimmed_len && line[bq_skip] == '>') {
+                    bq_skip++;
+                    if (bq_skip < trimmed_len && line[bq_skip] == ' ') bq_skip++;
+                }
+                size_t rem_len = line_len > bq_skip ? line_len - bq_skip : 0;
+                sb_append_n(sb, line + bq_skip, rem_len);
+                sb_append_char(sb, '\n');
+                p = line_end + 1;
+                continue;
+            }
             if (list_depth > 0) list_pop_to(sb, li_content, list_stack, &list_depth, 0);
             if (!in_blockquote) {
                 sb_append(sb, "<blockquote>\n");
                 in_blockquote = 1;
                 bq_has_content = 0;
+                bq_in_html_block = 0;
             }
             size_t qpos = bq_start;
             size_t gt_col = bq_start;
@@ -852,9 +1108,34 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                         }
                         sb_append(sb, "<hr />\n");
                     } else {
-                        if (bq_has_content) sb_append_char(para_buf, '\n');
-                        bq_has_content = 1;
-                        sb_append_n(para_buf, bq_content + 0, content_len);
+                        /* Check for HTML block inside blockquote */
+                        int bq_hb = is_html_block_start(bq_content, content_len);
+                        if (bq_hb > 0) {
+                            if (bq_has_content) {
+                                sb_append(sb, "<p>");
+                                render_inline(sb, para_buf->data, para_buf->len, 1, 1, refs, n_refs);
+                                sb_append(sb, "</p>\n");
+                                bq_has_content = 0;
+                                para_buf->len = 0;
+                                para_buf->data[0] = '\0';
+                            }
+                            bq_in_html_block = 1;
+                            sb_append_n(sb, bq_content, content_len);
+                            sb_append_char(sb, '\n');
+                            p = line_end + 1;
+                            continue;
+                        }
+                        RefDef bq_rd;
+                        if (parse_ref_def(bq_content, content_len, &bq_rd)) {
+                            ref_def_free(&bq_rd);
+                            if (!bq_has_content) {
+                                bq_has_content = 0;
+                            }
+                        } else {
+                            if (bq_has_content) sb_append_char(para_buf, '\n');
+                            bq_has_content = 1;
+                            sb_append_n(para_buf, bq_content + 0, content_len);
+                        }
                     }
                 }
             }
@@ -1376,6 +1657,51 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
             }
         }
         if (list_cont_handled) continue;
+
+        /* Check for HTML block start while paragraph is open (interrupts the paragraph).
+           Types 1-5 can always interrupt; types 6-7 can also interrupt (spec match). */
+        if (para_has_content && !in_blockquote && !in_fence) {
+            int hb_type = is_html_block_start(line, trimmed_len);
+            if (hb_type > 0) {
+                sb_append(sb, "<p>");
+                render_inline(sb, para_buf->data, para_buf->len, 1, 1, refs, n_refs);
+                sb_append(sb, "</p>\n");
+                para_has_content = 0;
+                para_buf->len = 0;
+                para_buf->data[0] = '\0';
+                in_html_block = 1;
+                html_block_type = hb_type;
+                sb_append_n(sb, line, line_len);
+                sb_append_char(sb, '\n');
+                p = line_end + 1;
+                continue;
+            }
+        }
+
+        /* Check for block-level HTML tag (closing or opening) that is NOT an HTML block
+           but still interrupts a paragraph (e.g. </pre>, </td></tr></table>).
+           After closing the paragraph, output the line as raw HTML. */
+        if (trimmed_len > 0) {
+            size_t blk_i = 0;
+            while (blk_i < trimmed_len && blk_i < 3 && line[blk_i] == ' ') blk_i++;
+            if (blk_i < trimmed_len && line[blk_i] == '<') {
+                int hb2 = is_html_block_start(line, trimmed_len);
+                if (hb2 == 0 && is_html_block_tag(line + blk_i, trimmed_len - blk_i)) {
+                    if (para_has_content) {
+                        sb_append(sb, "<p>");
+                        render_inline(sb, para_buf->data, para_buf->len, 1, 1, refs, n_refs);
+                        sb_append(sb, "</p>\n");
+                        para_has_content = 0;
+                        para_buf->len = 0;
+                        para_buf->data[0] = '\0';
+                    }
+                    sb_append_n(sb, line, line_len);
+                    sb_append_char(sb, '\n');
+                    p = line_end + 1;
+                    continue;
+                }
+            }
+        }
 
 fallback_paragraph:
         if (para_has_content && (para_buf->len == 0 || para_buf->data[para_buf->len - 1] != '\n')) sb_append_char(para_buf, '\n');
