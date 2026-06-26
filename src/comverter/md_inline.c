@@ -177,6 +177,57 @@ static int collect_delim_runs(const char *text, size_t len, DelimRun runs[], int
     return n;
 }
 
+static int is_entity_at(const char *text, size_t len, size_t pos) {
+    if (pos >= len || text[pos] != '&') return 0;
+    size_t j = pos + 1;
+    if (j >= len || !isalpha((unsigned char)text[j])) return 0;
+    while (j < len && (isalnum((unsigned char)text[j]))) j++;
+    if (j < len && text[j] == ';') return 1;
+    return 0;
+}
+
+/* Strip trailing ASCII punctuation, then balance parentheses.
+   Returns the new end position (<= end). */
+static size_t autolink_strip_trailing(const char *text, size_t end, int has_leading_paren) {
+    while (end > 0 && strchr(".,;?!:-'\"", text[end - 1]))
+        end--;
+    /* Count parentheses to balance: strip extra closing parens */
+    int open = 0;
+    for (size_t i = 0; i < end; i++) {
+        if (text[i] == '(') open++;
+        else if (text[i] == ')') open--;
+    }
+    /* If we have a leading '(' outside the URL, allow one extra ')' */
+    if (has_leading_paren) open++;
+    while (open < 0 && end > 0) {
+        if (text[end - 1] != ')') break;
+        end--;
+        while (end > 0 && strchr(".,;?!:-'\"", text[end - 1]))
+            end--;
+        open++;
+    }
+    return end;
+}
+
+/* Scan valid autolink path characters, stopping before entities */
+static size_t autolink_scan_path(const char *text, size_t len, size_t start) {
+    size_t pos = start;
+    while (pos < len) {
+        if (is_entity_at(text, len, pos)) break;
+        unsigned char c = (unsigned char)text[pos];
+        if (isalnum(c) || c == '/' || c == '?' || c == '#' || c == '@' ||
+            c == ':' || c == '&' || c == '=' || c == '~' || c == '.' ||
+            c == '_' || c == '-' || c == '+' || c == '%' || c == '!' ||
+            c == '$' || c == '\'' || c == '(' || c == ')' || c == '*' ||
+            c == ',' || c == ';') {
+            pos++;
+        } else {
+            break;
+        }
+    }
+    return pos;
+}
+
 static int is_valid_www_autolink(const char *text, size_t len, size_t *consumed) {
     if (len < 5 || text[0] != 'w' || text[1] != 'w' || text[2] != 'w' || text[3] != '.')
         return 0;
@@ -209,21 +260,80 @@ static int is_valid_www_autolink(const char *text, size_t len, size_t *consumed)
     size_t domain_len = pos - 4;
     if (domain_len > 32) return 0;
 
-    while (pos < len) {
-        unsigned char c = (unsigned char)text[pos];
-        if (isalnum(c) || strchr(";?&#=~._-+%!$'()*,/", c)) {
-            pos++;
-        } else {
-            break;
-        }
-    }
+    pos = autolink_scan_path(text, len, pos);
 
-    while (pos > 0 && strchr(".-_?=!$'()*+,;&", text[pos - 1]))
+    int has_leading_paren = 0;
+    if (pos > 4 && text[4] == '(') { has_leading_paren = 1; }
+    pos = autolink_strip_trailing(text, pos, has_leading_paren);
+
+    while (pos > 0 && strchr(".-_?=!$'(*+,;&", text[pos - 1]))
         pos--;
 
     if (pos <= 4) return 0;
 
     *consumed = pos;
+    return 1;
+}
+
+static int is_valid_uri_autolink_raw(const char *text, size_t len, size_t *consumed) {
+    static const char *schemes[] = {"http://", "https://", "ftp://", NULL};
+    int scheme_len = 0;
+    for (int si = 0; schemes[si]; si++) {
+        size_t sl = strlen(schemes[si]);
+        if (len >= sl && memcmp(text, schemes[si], sl) == 0) {
+            scheme_len = (int)sl;
+            break;
+        }
+    }
+    if (scheme_len == 0) return 0;
+
+    size_t pos = (size_t)scheme_len;
+    if (pos >= len) return 0;
+
+    pos = autolink_scan_path(text, len, pos);
+    if (pos <= (size_t)scheme_len) return 0;
+
+    int has_leading_paren = (scheme_len > 0 && text[scheme_len] == '(') ? 1 : 0;
+    pos = autolink_strip_trailing(text, pos, has_leading_paren);
+
+    *consumed = pos;
+    return 1;
+}
+
+/* Check if text at pos looks like a disallowed HTML tag (GFM tagfilter extension).
+   If so, return 1 and set *consumed to the full length including >.
+   The tag is output with &lt; instead of < but > is kept as-is. */
+static int is_disallowed_html_tag(const char *text, size_t len, size_t *consumed) {
+    static const char *disallowed[] = {
+        "title", "textarea", "style", "xmp", "pre", "script",
+        "iframe", "noembed", "noframes", "noscript", "plaintext", NULL
+    };
+    if (len < 2 || text[0] != '<') return 0;
+    size_t start = 1;
+    if (start < len && text[start] == '/') { start++; }
+    if (start >= len || !isalpha((unsigned char)text[start])) return 0;
+    size_t name_end = start;
+    while (name_end < len && (isalnum((unsigned char)text[name_end]) || text[name_end] == '-'))
+        name_end++;
+    size_t name_len = name_end - start;
+    if (name_len == 0) return 0;
+    /* Check if the tag name matches a disallowed tag */
+    int matched = 0;
+    for (int di = 0; disallowed[di]; di++) {
+        size_t dl = strlen(disallowed[di]);
+        if (name_len == dl) {
+            int m = 1;
+            for (size_t ci = 0; ci < dl; ci++)
+                if (tolower((unsigned char)text[start + ci]) != disallowed[di][ci]) { m = 0; break; }
+            if (m) { matched = 1; break; }
+        }
+    }
+    if (!matched) return 0;
+    /* Find the closing > */
+    size_t gt = name_end;
+    while (gt < len && text[gt] != '>') gt++;
+    if (gt >= len) return 0;
+    *consumed = gt + 1;
     return 1;
 }
 
@@ -544,6 +654,12 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
             size_t alt_end = 0;
             while (j < len && depth > 0) {
                 if (is_backslash_escaped(text, len, j)) { j++; continue; }
+                if (text[j] == '<') {
+                    size_t tc = 0;
+                    if (is_html_tag(text + j, len - j, &tc)) { j += tc; continue; }
+                    if (is_valid_uri_autolink(text + j, len - j, &tc)) { j += tc; continue; }
+                    if (is_valid_email_autolink(text + j, len - j, &tc)) { j += tc; continue; }
+                }
                 if (text[j] == '[') depth++;
                 else if (text[j] == ']') { depth--; if (depth == 0) alt_end = j; }
                 j++;
@@ -644,6 +760,12 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
             size_t text_end = 0;
             while (j < len && depth > 0) {
                 if (is_backslash_escaped(text, len, j)) { j++; continue; }
+                if (text[j] == '<') {
+                    size_t tc = 0;
+                    if (is_html_tag(text + j, len - j, &tc)) { j += tc; continue; }
+                    if (is_valid_uri_autolink(text + j, len - j, &tc)) { j += tc; continue; }
+                    if (is_valid_email_autolink(text + j, len - j, &tc)) { j += tc; continue; }
+                }
                 if (text[j] == '[') depth++;
                 else if (text[j] == ']') { depth--; if (depth == 0) text_end = j; }
                 j++;
@@ -654,6 +776,8 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                 size_t ns = link_start;
                 while (ns < text_end) {
                     if (text[ns] == '[') {
+                        /* Skip ![ for images — images inside links are valid */
+                        if (ns > link_start && text[ns - 1] == '!') { ns++; continue; }
                         int nd = 1;
                         size_t nc = ns + 1;
                         while (nc < text_end && nd > 0) {
@@ -673,7 +797,6 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                                 if (pd == 0) { text_end = 0; break; }
                             }
                             if (nc + 1 < text_end && text[nc + 1] == '[') { text_end = 0; break; }
-                            if (nc + 1 < len && nc + 1 <= text_end && text[nc + 1] == ']') { text_end = 0; break; }
                         }
                     }
                     ns++;
@@ -825,29 +948,70 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                 i += tag_consumed;
                 continue;
             }
+            if ((g_gfm_extensions & GFM_ENABLE_TAGFILTER) && is_disallowed_html_tag(text + i, len - i, &tag_consumed)) {
+                sb_append(sb, "&lt;");
+                sb_append_n(sb, text + i + 1, tag_consumed - 2);
+                sb_append_char(sb, '>');
+                i += tag_consumed;
+                continue;
+            }
             sb_append(sb, "&lt;");
             i++;
             continue;
         }
 
-        if (!pos_inside_code_span(text, len, i) && !pos_inside_link(text, len, i, refs, n_refs)) {
+        if ((g_gfm_extensions & GFM_ENABLE_AUTOLINK) && !pos_inside_code_span(text, len, i) && !pos_inside_link(text, len, i, refs, n_refs)) {
             if (i == 0 || (!isalnum((unsigned char)text[i-1]) && text[i-1] != '.' && text[i-1] != '/')) {
-                size_t www_consumed = 0;
-                if (is_valid_www_autolink(text + i, len - i, &www_consumed)) {
+                size_t au_consumed = 0;
+                if (is_valid_www_autolink(text + i, len - i, &au_consumed)) {
                     sb_append(sb, "<a href=\"http://");
-                    for (size_t wi = 0; wi < www_consumed; wi++) {
+                    for (size_t wi = 0; wi < au_consumed; wi++) {
                         unsigned char c = (unsigned char)(text[i + wi]);
                         if (c == '&') sb_append(sb, "&amp;");
                         else sb_append_char(sb, c);
                     }
                     sb_append(sb, "\">");
-                    for (size_t wi = 0; wi < www_consumed; wi++) {
+                    for (size_t wi = 0; wi < au_consumed; wi++) {
                         unsigned char c = (unsigned char)(text[i + wi]);
                         if (c == '&') sb_append(sb, "&amp;");
                         else sb_append_char(sb, c);
                     }
                     sb_append(sb, "</a>");
-                    i += www_consumed;
+                    i += au_consumed;
+                    continue;
+                }
+                if (is_valid_uri_autolink_raw(text + i, len - i, &au_consumed)) {
+                    sb_append(sb, "<a href=\"");
+                    for (size_t wi = 0; wi < au_consumed; wi++) {
+                        unsigned char c = (unsigned char)(text[i + wi]);
+                        if (c == '&') sb_append(sb, "&amp;");
+                        else sb_append_char(sb, c);
+                    }
+                    sb_append(sb, "\">");
+                    for (size_t wi = 0; wi < au_consumed; wi++) {
+                        unsigned char c = (unsigned char)(text[i + wi]);
+                        if (c == '&') sb_append(sb, "&amp;");
+                        else sb_append_char(sb, c);
+                    }
+                    sb_append(sb, "</a>");
+                    i += au_consumed;
+                    continue;
+                }
+                if (is_valid_email_autolink_nobracket(text + i, len - i, &au_consumed)) {
+                    sb_append(sb, "<a href=\"mailto:");
+                    for (size_t ei = 0; ei < au_consumed; ei++) {
+                        unsigned char c = (unsigned char)(text[i + ei]);
+                        if (c == '&') sb_append(sb, "&amp;");
+                        else sb_append_char(sb, c);
+                    }
+                    sb_append(sb, "\">");
+                    for (size_t ei = 0; ei < au_consumed; ei++) {
+                        unsigned char c = (unsigned char)(text[i + ei]);
+                        if (c == '&') sb_append(sb, "&amp;");
+                        else sb_append_char(sb, c);
+                    }
+                    sb_append(sb, "</a>");
+                    i += au_consumed;
                     continue;
                 }
             }

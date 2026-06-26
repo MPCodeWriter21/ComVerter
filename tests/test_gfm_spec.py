@@ -16,7 +16,8 @@ with open(SPEC_PATH, "r", encoding="utf-8") as f:
     [pytest.param(e, id=f"#{e['example']:04d}-{e['section']}") for e in spec_examples],
 )
 def test_spec_example(example):
-    result = markdown_to_html(example["markdown"])
+    exts = example.get("extensions", None)
+    result = markdown_to_html(example["markdown"], extensions=exts)
     assert result == example["html"], (
         f"\nExample #{example['example']} ({example['section']}, "
         f"line {example['start_line']})\n"

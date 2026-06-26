@@ -276,3 +276,48 @@ int is_html_block_start(const char *line, size_t len) {
     }
     return 0;
 }
+
+/* Disallowed HTML tags (GFM tagfilter extension) */
+static int is_disallowed_tag_name(const char *text, size_t len) {
+    static const char *disallowed[] = {
+        "title", "textarea", "style", "xmp", "pre", "script",
+        "iframe", "noembed", "noframes", "noscript", "plaintext", NULL
+    };
+    for (int di = 0; disallowed[di]; di++) {
+        size_t dl = strlen(disallowed[di]);
+        if (len == dl) {
+            int m = 1;
+            for (size_t ci = 0; ci < dl; ci++)
+                if (tolower((unsigned char)text[ci]) != disallowed[di][ci]) { m = 0; break; }
+            if (m) return 1;
+        }
+    }
+    return 0;
+}
+
+void sb_append_with_disallowed_escaped(StringBuilder *sb, const char *text, size_t len) {
+    size_t i = 0;
+    while (i < len) {
+        if (text[i] == '<') {
+            size_t start = i + 1;
+            if (start < len && text[start] == '/') { start++; }
+            size_t name_start = start;
+            while (start < len && (isalnum((unsigned char)text[start]) || text[start] == '-'))
+                start++;
+            size_t name_len = start - name_start;
+            if (name_len > 0 && is_disallowed_tag_name(text + name_start, name_len)) {
+                size_t gt = start;
+                while (gt < len && text[gt] != '>') gt++;
+                if (gt < len) {
+                    sb_append(sb, "&lt;");
+                    sb_append_n(sb, text + i + 1, gt - i - 1);
+                    sb_append_char(sb, '>');
+                    i = gt + 1;
+                    continue;
+                }
+            }
+        }
+        sb_append_char(sb, text[i]);
+        i++;
+    }
+}

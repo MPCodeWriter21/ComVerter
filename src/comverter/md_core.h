@@ -9,6 +9,10 @@
 #include <string.h>
 
 #define MAX_LIST_DEPTH 16
+#define GFM_ENABLE_TAGFILTER 1
+#define GFM_ENABLE_AUTOLINK 2
+
+extern int g_gfm_extensions;
 
 /* Bounded string search: like strstr but only searches within the first n bytes */
 static inline const char *nstrstr(const char *haystack, size_t n, const char *needle) {
@@ -57,6 +61,7 @@ typedef struct {
     size_t saved_cap;
     int first_item_content_pos;
     int first_item_content_len;
+    int had_block_content;  /* 1=block content (fence, bq) emitted directly to sb */
 } ListEntry;
 
 typedef struct {
@@ -126,6 +131,7 @@ int is_html_tag(const char *text, size_t len, size_t *consumed);
 /* HTML block */
 int is_html_block_tag(const char *tag, size_t remaining);
 int is_html_block_start(const char *line, size_t len);
+void sb_append_with_disallowed_escaped(StringBuilder *sb, const char *text, size_t len);
 
 /* Inline rendering */
 int pos_inside_code_span(const char *text, size_t len, size_t pos);
