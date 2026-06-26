@@ -1,4 +1,4 @@
-.PHONY: all setup reconfigure build test test-all clean help
+.PHONY: all setup reconfigure build install test test-all clean help
 
 BUILDDIR ?= builddir
 
@@ -30,14 +30,15 @@ build:
 	uv run meson compile -C $(BUILDDIR)
 	uv build --wheel
 
-test:
-	uv pip install -q pytest
+install:
 	uv pip install -e .
+
+test: install
+	uv pip install -q pytest
 	uv run pytest -v --maxfail 3 tests/
 
-test-all:
+test-all: install
 	uv pip install -q pytest
-	uv pip install -e .
 	uv run pytest -q tests/
 
 clean:
