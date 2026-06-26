@@ -1,14 +1,15 @@
 import json
+from pathlib import Path
 
-with open("./tests/commonmark-spec-0.31.2.json", "r", encoding="utf-8") as file:
+root = Path(__file__).parent
+
+with open(root / "tests/commonmark-spec-0.31.2.json", "r", encoding="utf-8") as file:
     commonmark_tests = json.load(file)
-
 
 commonmark_tests_dict = {test["markdown"]: test for test in commonmark_tests}
 
-with open("./tests/gfm-spec-0.29.0-13.json", "r", encoding="utf-8") as file:
+with open(root / "tests/gfm-spec-0.29.0-13.json", "r", encoding="utf-8") as file:
     gfm_tests = json.load(file)
-
 
 clean_gfm = []
 
@@ -26,5 +27,5 @@ for test in gfm_tests:
     else:
         clean_gfm.append(test)
 
-with open("./tests/clean-gfm-tests.json", "w", encoding="utf-8") as file:
+with open(root / "tests/clean-gfm-tests.json", "w", encoding="utf-8") as file:
     json.dump(clean_gfm, file, indent=2)
