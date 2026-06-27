@@ -44,7 +44,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install meson-python ninja uv
-      - run: uv build --wheel
+      - run: uv python pin ${{ matrix.python-version }} && uv build --wheel
         env:
           UV_PYTHON_PREFERENCE: only-system
       - run: uv pip install dist/comverter-*.whl --force-reinstall --system
