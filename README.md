@@ -8,6 +8,15 @@ ComVerter - The Common Converter
 ComVerter is a simple C Python extension that I plan to use for converting some simple
 formats to others. Like Markdown to HTML, HTML to PDF, and many others.
 
+Features
+--------
+
+- [x] Markdown to HTML
+- [ ] HTML to PDF
+
+Want another format? [Open an issue](https://github.com/MPCodeWriter21/comverter/issues)
+or [submit a pull request](https://github.com/MPCodeWriter21/comverter/pulls).
+
 Build & Install (Release)
 -------------------------
 
