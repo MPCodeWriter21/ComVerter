@@ -1,5 +1,5 @@
 # Add the option to build and install in debug mode instead of release in Makefile
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 70
 - TAGS: make, build, debug
