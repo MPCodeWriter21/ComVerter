@@ -14,6 +14,10 @@ build tool.
 Instructions
 ------------
 
+- Bump the version (minor or patch) in `pyproject.toml` when commits
+  represent a meaningful change in functionality (new feature, breaking
+  change, significant fix). Minor for features, patch for bug fixes.
+
 - Never revert/override changes made by the user without asking for confirmation.
 - Always ask for clarification if the user request is ambiguous.
 - Do not commit anything without running the tests first.
