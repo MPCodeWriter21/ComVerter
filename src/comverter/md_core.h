@@ -51,6 +51,7 @@ typedef struct {
     char marker;       /* '-', '+', '*' for ul; 0 for ol */
     char delimiter;    /* '.', ')' for ol; 0 for ul */
     int content_col;   /* column where item content starts */
+    int min_content_col; /* minimum continuation indent (marker_col + marker_width + 1) */
     int start_num;     /* starting number for ol; 0 for ul */
     int is_loose;      /* 1=loose list */
     int after_blank;   /* 1=blank line since last item start */
@@ -62,6 +63,8 @@ typedef struct {
     int first_item_content_pos;
     int first_item_content_len;
     int had_block_content;  /* 1=block content (fence, bq) emitted directly to sb */
+    int had_content;        /* 1=item has ever had content (tight or block) */
+    int first_block_code;   /* 1=first block was indented code (extra spaces >=4) */
 } ListEntry;
 
 typedef struct {

@@ -152,6 +152,15 @@ void list_push(ListEntry *stack, int *depth, int type, char marker, char delimit
     stack[d].marker = marker;
     stack[d].delimiter = delimiter;
     stack[d].content_col = content_col;
+    if (type == 1) {
+        stack[d].min_content_col = marker_col + 2;
+    } else if (type == 2) {
+        int digits = 1, n = start_num;
+        while (n >= 10) { digits++; n /= 10; }
+        stack[d].min_content_col = marker_col + digits + 2;
+    } else {
+        stack[d].min_content_col = content_col;
+    }
     stack[d].start_num = start_num;
     stack[d].is_loose = 0;
     stack[d].after_blank = 0;
@@ -162,6 +171,9 @@ void list_push(ListEntry *stack, int *depth, int type, char marker, char delimit
     stack[d].saved_cap = 0;
     stack[d].first_item_content_pos = -1;
     stack[d].first_item_content_len = 0;
+    stack[d].had_content = 0;
+    stack[d].had_block_content = 0;
+    stack[d].first_block_code = 0;
     *depth = d + 1;
 }
 
@@ -232,7 +244,21 @@ void list_pop(StringBuilder *sb, StringBuilder *li_content, ListEntry *stack, in
     if (e->type == 1) sb_append(sb, "</ul>\n");
     else sb_append(sb, "</ol>\n");
     (*depth)--;
-    if (had_blank && *depth > 0) stack[*depth - 1].after_blank = 1;
+    if (had_blank && *depth > 0) {
+        stack[*depth - 1].after_blank = 1;
+    }
+    /* Restore parent's saved content if any */
+    if (*depth > 0) {
+        ListEntry *parent = &stack[*depth - 1];
+        if (parent->saved_data) {
+            li_content->data = parent->saved_data;
+            li_content->len = parent->saved_len;
+            li_content->cap = parent->saved_cap;
+            parent->saved_data = NULL;
+            parent->saved_len = 0;
+            parent->saved_cap = 0;
+        }
+    }
 }
 
 void list_emit_open(StringBuilder *sb, ListEntry *e) {
@@ -369,6 +395,8 @@ void process_list_content(StringBuilder *sb, StringBuilder *li_content, ListEntr
                 return;
             }
         }
+        ListEntry *cur = list_top(stack, *depth);
+        if (cur) cur->had_content = 1;
         render_inline(li_content, content, content_len, 1, 1, refs, n_refs);
     }
 }
@@ -540,6 +568,7 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
     int bq_is_paragraph = 0;
     int bq_in_indented_code = 0;
     int in_indented_code = 0;
+    size_t ic_target_col = 4;
     int code_pending_newlines = 0;
     int in_html_block = 0;
     int html_block_type = 0;
@@ -636,17 +665,14 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                 in_blockquote = 0;
                 /* Re-process this line by falling through */
             } else {
-                if (is_fence_end(line, trimmed_len, fence_char, fence_len)) {
+                size_t fc_start = 0;
+                int fc_rem = fence_open_indent;
+                while (fc_start < line_len && fc_rem > 0 && line[fc_start] == ' ') { fc_start++; fc_rem--; }
+                if (is_fence_end(line + fc_start, trimmed_len - fc_start, fence_char, fence_len)) {
                     in_fence = 0;
                     sb_append(sb, "</code></pre>\n");
                 } else {
-                    size_t content_start = 0;
-                    int remaining = fence_open_indent;
-                    while (content_start < line_len && remaining > 0 && line[content_start] == ' ') {
-                        content_start++;
-                        remaining--;
-                    }
-                    escape_html(sb, line + content_start, line_len - content_start);
+                    escape_html(sb, line + fc_start, line_len - fc_start);
                     sb_append(sb, "\n");
                 }
                 p = line_end + 1;
@@ -656,14 +682,12 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
 
         if (in_indented_code) {
             size_t ic_indent = get_indent_tab(line, line_len);
-            /* A line with non-whitespace content and <4 indent exits the code block.
-               Blank lines (only whitespace) stay inside the code block. */
-            if (trimmed_len > 0 && ic_indent < 4) {
+            if (trimmed_len > 0 && ic_indent < ic_target_col) {
                 in_indented_code = 0;
                 code_pending_newlines = 0;
                 sb_append(sb, "</code></pre>\n");
             } else {
-                size_t content_start = content_start_at_col(orig_line, orig_line_len, 4);
+                size_t content_start = content_start_at_col(orig_line, orig_line_len, ic_target_col);
                 size_t content_len = orig_line_len - content_start;
                 if (content_len == 0) {
                     code_pending_newlines++;
@@ -683,8 +707,9 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
             size_t indent_col = get_indent_tab(line, line_len);
             if (indent_col >= 4) {
                 in_indented_code = 1;
+                ic_target_col = 4;
                 sb_append(sb, "<pre><code>");
-                size_t content_start = content_start_at_col(orig_line, orig_line_len, 4);
+                size_t content_start = content_start_at_col(orig_line, orig_line_len, ic_target_col);
                 escape_html(sb, orig_line + content_start, orig_line_len - content_start);
                 sb_append(sb, "\n");
                 p = line_end + 1;
@@ -1389,8 +1414,29 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                 size_t fence_indent = get_indent(line, trimmed_len);
                 ListEntry *fence_cur = list_top(list_stack, list_depth);
                 if (fence_indent >= (size_t)fence_cur->content_col) {
-                    if (fence_cur->item_open) { list_flush_content(sb, li_content, fence_cur); sb_append_char(sb, '\n'); }
+                    if (fence_cur->item_open) {
+                        int had_content = li_content->len > 0;
+                        list_flush_content(sb, li_content, fence_cur);
+                        if (had_content || sb->len == 0 || sb->data[sb->len - 1] != '\n') sb_append_char(sb, '\n');
+                    }
                     in_fence = 1; fence_char = f_char; fence_len = f_len; fence_open_indent = f_indent;
+                    sb_append(sb, "<pre><code");
+                    if (f_info_len > 0) {
+                        size_t ws = 0;
+                        while (ws < f_info_len && (f_info[ws] == ' ' || f_info[ws] == '\t')) ws++;
+                        size_t word_start = ws;
+                        size_t word_end = ws;
+                        while (word_end < f_info_len && f_info[word_end] != ' ' && f_info[word_end] != '\t') {
+                            if (f_info[word_end] == '\\' && word_end + 1 < f_info_len) word_end += 2;
+                            else word_end++;
+                        }
+                        if (word_end > word_start) {
+                            sb_append(sb, " class=\"language-");
+                            for (size_t wi = word_start; wi < word_end; wi++) sb_append_char(sb, f_info[wi]);
+                            sb_append_char(sb, '"');
+                        }
+                    }
+                    sb_append(sb, ">");
                     p = line_end + 1;
                     continue;
                 }
@@ -1587,6 +1633,14 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
 
             if (is_ul) {
                 int mc = (int)ul_mcol;
+                /* Check if marker indent exceeds sibling range but is below content column → continuation text */
+                if (list_depth > 0) {
+                    ListEntry *top = list_top(list_stack, list_depth);
+                    if (mc >= top->marker_col + 4 && mc < top->content_col) {
+                        is_ul = 0;
+                    }
+                }
+                if (!is_ul) goto after_ul;
                 int cc;
                 size_t sp;
                 size_t marker_end = (size_t)(ul_marker_char_pos);
@@ -1605,8 +1659,8 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                         sp++;
                     }
                 } else {
-                    /* No space/tab after marker — adjust cc but no content */
-                    cc = mc + 1;
+                    /* No space/tab after marker — use mc+2 for empty items */
+                    cc = mc + 2;
                     sp = sep_pos;
                 }
 
@@ -1620,8 +1674,22 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                 int slot = -1, sub = 0;
                 if (list_depth > 0) {
                     for (int d = list_depth - 1; d >= 0; d--) {
-                        if (mc >= list_stack[d].content_col) { slot = d; sub = 1; break; }
-                        else if (mc >= list_stack[d].marker_col) { slot = d; sub = 0; break; }
+                        if (mc >= list_stack[d].marker_col && mc < list_stack[d].marker_col + 4) {
+                            /* Marker is within 3 spaces of this list's start — valid sibling range */
+                            if (mc >= list_stack[d].content_col) {
+                                if (!list_stack[d].after_blank || list_stack[d].type != 1 || list_stack[d].marker != ul_c) {
+                                    slot = d; sub = 1; break;
+                                }
+                                slot = d; sub = 0; break;
+                            }
+                            slot = d; sub = 0; break;
+                        } else if (mc >= list_stack[d].content_col) {
+                            /* Past sibling range but at or past content column — sublist */
+                            slot = d; sub = 1; break;
+                        } else if (mc >= list_stack[d].marker_col) {
+                            /* Past sibling range and below content column — continuation text */
+                            break;
+                        }
                     }
                 }
 
@@ -1649,6 +1717,9 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                             list_open_item(sb, &list_stack[list_depth - 1]);
                         } else { list_pop(sb, li_content, list_stack, &list_depth); }
                     }
+                    if (list_depth == 0 && mc >= 4) {
+                        goto fallback_paragraph;
+                    }
                     if (list_depth == 0 || !list_matches(&list_stack[list_depth - 1], 1, ul_c, 0)) {
                         list_push(list_stack, &list_depth, 1, ul_c, 0, mc, cc, 0);
                         list_emit_open(sb, &list_stack[list_depth - 1]);
@@ -1661,9 +1732,9 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                 while (ul_content_start < trimmed_len && (line[ul_content_start] == ' ' || line[ul_content_start] == '\t')) ul_content_start++;
                 if (ul_content_start < trimmed_len) {
                     size_t content_col = col_at_pos(line, ul_content_start);
-                    if (content_col >= (size_t)cc + 4 && cc + 4 > 4) {
+                    if (content_col >= (size_t)(mc + 6)) {
                         /* Indented code block within list item */
-                        size_t target = (size_t)cc + 4;
+                        size_t target = (size_t)(mc + 6);
                         size_t code_col = 0, code_pos = 0;
                         size_t leftover = 0;
                         while (code_pos < orig_line_len && code_col < target) {
@@ -1682,7 +1753,12 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                             }
                         }
                         ListEntry *cur = list_top(list_stack, list_depth);
-                        if (cur && cur->item_open) { list_flush_content(sb, li_content, cur); sb_append_char(sb, '\n'); }
+                        if (cur && cur->item_open) {
+                            if (!cur->had_content && !cur->had_block_content) cur->first_block_code = 1;
+                            cur->had_block_content = 1;
+                            list_flush_content(sb, li_content, cur);
+                            sb_append_char(sb, '\n');
+                        }
                         sb_append(sb, "<pre><code>");
                         for (size_t k = 0; k < leftover; k++) sb_append_char(sb, ' ');
                         escape_html(sb, orig_line + code_pos, orig_line_len - code_pos);
@@ -1693,10 +1769,16 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                         /* Blockquote as initial content of a list item */
                         ListEntry *bq_init = list_top(list_stack, list_depth);
                         if (bq_init && bq_init->item_open) { list_flush_content(sb, li_content, bq_init); sb_append_char(sb, '\n'); }
-                        sb_append(sb, "<blockquote>\n");
-                        in_blockquote = 1; bq_depth = 1; bq_has_content = 0; bq_is_paragraph = 0; bq_in_indented_code = 0;
+                        in_blockquote = 1; bq_has_content = 0; bq_is_paragraph = 0; bq_in_indented_code = 0;
                         size_t bq_pos = ul_content_start;
-                        if (bq_pos < trimmed_len && line[bq_pos] == '>') { bq_pos++; if (bq_pos < trimmed_len && line[bq_pos] == ' ') bq_pos++; }
+                        int bq_count = 0;
+                        while (bq_pos < trimmed_len && line[bq_pos] == '>') {
+                            bq_count++;
+                            bq_pos++;
+                            while (bq_pos < trimmed_len && line[bq_pos] == ' ') bq_pos++;
+                        }
+                        bq_depth = bq_count;
+                        for (int bi = 0; bi < bq_count; bi++) sb_append(sb, "<blockquote>\n");
                         size_t bq_rem = trimmed_len - bq_pos;
                         if (bq_rem > 0) {
                             size_t bq_end = bq_rem;
@@ -1706,6 +1788,30 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                                 bq_has_content = 1; bq_is_paragraph = 1;
                             }
                         }
+                    } else if (is_fence_start(line + ul_content_start, trimmed_len - ul_content_start, &f_char, &f_len, &f_indent, &f_info, &f_info_len)) {
+                        ListEntry *fcur = list_top(list_stack, list_depth);
+                        if (fcur && fcur->item_open) { list_flush_content(sb, li_content, fcur); sb_append_char(sb, '\n'); }
+                        in_fence = 1; fence_char = f_char; fence_len = f_len; fence_open_indent = (int)col_at_pos(line, ul_content_start) + f_indent;
+                        sb_append(sb, "<pre><code");
+                        if (f_info_len > 0) {
+                            size_t ws = 0;
+                            while (ws < f_info_len && (f_info[ws] == ' ' || f_info[ws] == '\t')) ws++;
+                            size_t word_start = ws;
+                            size_t word_end = ws;
+                            while (word_end < f_info_len && f_info[word_end] != ' ' && f_info[word_end] != '\t') {
+                                if (f_info[word_end] == '\\' && word_end + 1 < f_info_len) word_end += 2;
+                                else word_end++;
+                            }
+                            if (word_end > word_start) {
+                                sb_append(sb, " class=\"language-");
+                                for (size_t wi = word_start; wi < word_end; wi++) sb_append_char(sb, f_info[wi]);
+                                sb_append_char(sb, '"');
+                            }
+                        }
+                        sb_append(sb, ">");
+                        if (fcur) fcur->had_content = 1;
+                        p = line_end + 1;
+                        continue;
                     } else {
                         process_list_content(sb, li_content, list_stack, &list_depth, line + ul_content_start, trimmed_len - ul_content_start, (int)ul_content_start, refs, n_refs);
                     }
@@ -1714,6 +1820,7 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                 continue;
             }
         }
+        after_ul:;
 
         /* Ordered list items */
         {
@@ -1727,12 +1834,13 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                     int mc = (int)ol_indent;
                     int marker_end = (int)(d_start + 1);
                     int cc;
-                    if (d_start + 1 == trimmed_len) cc = marker_end + 1;
+                    if (d_start + 1 == trimmed_len) cc = marker_end + 2;
                     else if (line[d_start + 1] == '\t') cc = (marker_end + 4) & ~3;
                     else {
                         cc = marker_end + 1;
                         size_t sp = (size_t)(marker_end + 1);
-                        while (sp < trimmed_len && cc < 5 && (line[sp] == ' ' || line[sp] == '\t')) {
+                        int max_cc = marker_end + 5;
+                        while (sp < trimmed_len && cc < max_cc && (line[sp] == ' ' || line[sp] == '\t')) {
                             if (line[sp] == ' ') cc++;
                             else cc = (cc + 4) & ~3;
                             sp++;
@@ -1740,6 +1848,9 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                     }
 
                     if (para_has_content && list_depth == 0) {
+                        if (num != 1) {
+                            goto fallback_paragraph;
+                        }
                         sb_append(sb, "<p>");
                         render_inline(sb, para_buf->data, para_buf->len, 1, 1, refs, n_refs);
                         sb_append(sb, "</p>\n");
@@ -1749,8 +1860,17 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                     int slot = -1, sub = 0;
                     if (list_depth > 0) {
                         for (int d = list_depth - 1; d >= 0; d--) {
-                            if (mc >= list_stack[d].content_col) { slot = d; sub = 1; break; }
-                            else if (mc >= list_stack[d].marker_col) { slot = d; sub = 0; break; }
+                            if (mc >= list_stack[d].content_col) {
+                                if (!list_stack[d].after_blank || list_stack[d].type != 2 || list_stack[d].delimiter != delim) {
+                                    slot = d; sub = 1; break;
+                                }
+                                slot = d; sub = 0; break;
+                            } else if (mc >= list_stack[d].marker_col) {
+                                if (mc >= 4 && list_stack[d].after_blank && mc < list_stack[d].content_col) {
+                                    break;
+                                }
+                                slot = d; sub = 0; break;
+                            }
                         }
                     }
 
@@ -1778,6 +1898,9 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                                 list_open_item(sb, &list_stack[list_depth - 1]);
                             } else { list_pop(sb, li_content, list_stack, &list_depth); }
                         }
+                        if (list_depth == 0 && mc >= 4) {
+                            goto fallback_paragraph;
+                        }
                         if (list_depth == 0 || !list_matches(&list_stack[list_depth - 1], 2, 0, delim)) {
                             list_push(list_stack, &list_depth, 2, 0, delim, mc, cc, num);
                             list_emit_open(sb, &list_stack[list_depth - 1]);
@@ -1788,14 +1911,54 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                     size_t ol_content_start = (size_t)(marker_end + 1);
                     while (ol_content_start < trimmed_len && (line[ol_content_start] == ' ' || line[ol_content_start] == '\t')) ol_content_start++;
                     if (ol_content_start < trimmed_len) {
-                        if (line[ol_content_start] == '>') {
+                        size_t li_content_col = col_at_pos(line, ol_content_start);
+                        if (li_content_col >= (size_t)(marker_end + 5)) {
+                            /* Indented code block within list item */
+                            size_t target = (size_t)(marker_end + 5);
+                            size_t code_col = 0, code_pos = 0;
+                            size_t leftover = 0;
+                            while (code_pos < orig_line_len && code_col < target) {
+                                if (orig_line[code_pos] == '\t') {
+                                    size_t next_col = (code_col + 4) & ~3;
+                                    if (next_col > target) {
+                                        leftover = target - code_col;
+                                        code_col = target;
+                                    } else {
+                                        code_col = next_col;
+                                    }
+                                    code_pos++;
+                                } else {
+                                    code_col++;
+                                    code_pos++;
+                                }
+                            }
+                            ListEntry *cur = list_top(list_stack, list_depth);
+                            if (cur && cur->item_open) {
+                                if (!cur->had_content && !cur->had_block_content) cur->first_block_code = 1;
+                                cur->had_block_content = 1;
+                                list_flush_content(sb, li_content, cur);
+                                sb_append_char(sb, '\n');
+                            }
+                            sb_append(sb, "<pre><code>");
+                            for (size_t k = 0; k < leftover; k++) sb_append_char(sb, ' ');
+                            escape_html(sb, orig_line + code_pos, orig_line_len - code_pos);
+                            sb_append(sb, "\n</code></pre>\n");
+                            p = line_end + 1;
+                            continue;
+                        } else if (line[ol_content_start] == '>') {
                             /* Blockquote as initial content of a list item */
                             ListEntry *bq_init = list_top(list_stack, list_depth);
                             if (bq_init && bq_init->item_open) { list_flush_content(sb, li_content, bq_init); sb_append_char(sb, '\n'); }
-                            sb_append(sb, "<blockquote>\n");
-                            in_blockquote = 1; bq_depth = 1; bq_has_content = 0; bq_is_paragraph = 0; bq_in_indented_code = 0;
+                            in_blockquote = 1; bq_has_content = 0; bq_is_paragraph = 0; bq_in_indented_code = 0;
                             size_t bq_pos = ol_content_start;
-                            if (bq_pos < trimmed_len && line[bq_pos] == '>') { bq_pos++; if (bq_pos < trimmed_len && line[bq_pos] == ' ') bq_pos++; }
+                            int bq_count = 0;
+                            while (bq_pos < trimmed_len && line[bq_pos] == '>') {
+                                bq_count++;
+                                bq_pos++;
+                                while (bq_pos < trimmed_len && line[bq_pos] == ' ') bq_pos++;
+                            }
+                            bq_depth = bq_count;
+                            for (int bi = 0; bi < bq_count; bi++) sb_append(sb, "<blockquote>\n");
                             size_t bq_rem = trimmed_len - bq_pos;
                             if (bq_rem > 0) {
                                 size_t bq_end = bq_rem;
@@ -1805,6 +1968,30 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                                     bq_has_content = 1; bq_is_paragraph = 1;
                                 }
                             }
+                        } else if (is_fence_start(line + ol_content_start, trimmed_len - ol_content_start, &f_char, &f_len, &f_indent, &f_info, &f_info_len)) {
+                            ListEntry *fcur = list_top(list_stack, list_depth);
+                            if (fcur && fcur->item_open) { list_flush_content(sb, li_content, fcur); sb_append_char(sb, '\n'); }
+                            in_fence = 1; fence_char = f_char; fence_len = f_len; fence_open_indent = (int)col_at_pos(line, ol_content_start) + f_indent;
+                            sb_append(sb, "<pre><code");
+                            if (f_info_len > 0) {
+                                size_t ws = 0;
+                                while (ws < f_info_len && (f_info[ws] == ' ' || f_info[ws] == '\t')) ws++;
+                                size_t word_start = ws;
+                                size_t word_end = ws;
+                                while (word_end < f_info_len && f_info[word_end] != ' ' && f_info[word_end] != '\t') {
+                                    if (f_info[word_end] == '\\' && word_end + 1 < f_info_len) word_end += 2;
+                                    else word_end++;
+                                }
+                                if (word_end > word_start) {
+                                    sb_append(sb, " class=\"language-");
+                                    for (size_t wi = word_start; wi < word_end; wi++) sb_append_char(sb, f_info[wi]);
+                                    sb_append_char(sb, '"');
+                                }
+                            }
+                            sb_append(sb, ">");
+                            if (fcur) fcur->had_content = 1;
+                            p = line_end + 1;
+                            continue;
                         } else {
                             process_list_content(sb, li_content, list_stack, &list_depth, line + ol_content_start, trimmed_len - ol_content_start, (int)ol_content_start, refs, n_refs);
                         }
@@ -1850,15 +2037,23 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                         }
                         cur->after_blank = 0;
                         bq_has_content = 0; bq_is_paragraph = 0; bq_in_indented_code = 0; bq_in_html_block = 0;
-                        /* Open or continue blockquote within list item */
-                        if (!in_blockquote || bq_depth == 0) {
-                            sb_append(sb, "<blockquote>\n");
-                            in_blockquote = 1; bq_depth = 1;
+                        /* Parse all consecutive > markers for nested blockquotes */
+                        {
+                            size_t bq_scan = bq_mpos;
+                            int bq_count = 0;
+                            while (bq_scan < trimmed_len && line[bq_scan] == '>') {
+                                bq_count++;
+                                bq_scan++;
+                                while (bq_scan < trimmed_len && line[bq_scan] == ' ') bq_scan++;
+                            }
+                            if (!in_blockquote) in_blockquote = 1;
+                            while (bq_depth < bq_count) { sb_append(sb, "<blockquote>\n"); bq_depth++; }
+                            while (bq_depth > bq_count) { sb_append(sb, "</blockquote>\n"); bq_depth--; }
                         }
                         size_t after_mark = bq_mpos;
-                        if (after_mark < trimmed_len && line[after_mark] == '>') {
+                        while (after_mark < trimmed_len && line[after_mark] == '>') {
                             after_mark++;
-                            if (after_mark < trimmed_len && line[after_mark] == ' ') after_mark++;
+                            while (after_mark < trimmed_len && line[after_mark] == ' ') after_mark++;
                         }
                         size_t bq_rem = trimmed_len - after_mark;
                         if (bq_rem > 0) {
@@ -1873,6 +2068,54 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                         list_cont_handled = 1;
                         break;
                     }
+                    /* Skip all leading whitespace before fence detection */
+                    size_t fence_skip = 0;
+                    size_t fence_skip_col = 0;
+                    while (fence_skip < trimmed_len && (line[fence_skip] == ' ' || line[fence_skip] == '\t')) {
+                        if (line[fence_skip] == ' ') fence_skip_col++;
+                        else fence_skip_col = (fence_skip_col + 4) & ~3;
+                        fence_skip++;
+                    }
+                    char fence_dc = 0; int fence_dl = 0, fence_di = 0;
+                    const char *fence_di2 = NULL; size_t fence_dil = 0;
+                    int is_fence = is_fence_start(line + fence_skip, trimmed_len - fence_skip, &fence_dc, &fence_dl, &fence_di, &fence_di2, &fence_dil);
+                    if (is_fence) {
+                        cur->had_content = 1;
+                        if (li_content->len > 0) {
+                            if (cur->after_blank || cur->is_loose) {
+                                cur->is_loose = 1;
+                                sb_append(sb, "\n<p>");
+                                sb_append_n(sb, li_content->data, li_content->len);
+                                sb_append(sb, "</p>\n");
+                            } else {
+                                sb_append_n(sb, li_content->data, li_content->len);
+                                sb_append_char(sb, '\n');
+                            }
+                            li_content->len = 0;
+                        }
+                        cur->after_blank = 0;
+                        in_fence = 1; fence_char = fence_dc; fence_len = fence_dl; fence_open_indent = (int)fence_skip_col + fence_di;
+                        sb_append(sb, "<pre><code");
+                        if (fence_dil > 0) {
+                            size_t ws = 0;
+                            while (ws < fence_dil && (fence_di2[ws] == ' ' || fence_di2[ws] == '\t')) ws++;
+                            size_t word_start = ws;
+                            size_t word_end = ws;
+                            while (word_end < fence_dil && fence_di2[word_end] != ' ' && fence_di2[word_end] != '\t') {
+                                if (fence_di2[word_end] == '\\' && word_end + 1 < fence_dil) word_end += 2;
+                                else word_end++;
+                            }
+                            if (word_end > word_start) {
+                                sb_append(sb, " class=\"language-");
+                                for (size_t wi = word_start; wi < word_end; wi++) sb_append_char(sb, fence_di2[wi]);
+                                sb_append_char(sb, '"');
+                            }
+                        }
+                        sb_append(sb, ">");
+                        p = line_end + 1;
+                        list_cont_handled = 1;
+                        break;
+                    }
                     if (!cur->item_open) {
                         sb_append(sb, "<p>");
                         size_t scol = 0;
@@ -1880,16 +2123,82 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                         if (scol < trimmed_len) render_inline(sb, line + scol, trimmed_len - scol, 1, 1, refs, n_refs);
                         sb_append(sb, "</p>\n");
                     } else if (cur->after_blank && li_content->len == 0) {
-                        list_pop_to(sb, li_content, list_stack, &list_depth, 0);
-                        goto fallback_paragraph;
-                    } else if (cur->after_blank && extra_indent >= 4) {
-                        if (li_content->len > 0) {
-                            cur->is_loose = 1;
-                            sb_append(sb, "\n<p>");
-                            sb_append_n(sb, li_content->data, li_content->len);
-                            sb_append(sb, "</p>\n");
-                            li_content->len = 0;
+                        /* Check if line starts a new sibling list item */
+                        size_t lscol = 0;
+                        while (lscol < trimmed_len && (line[lscol] == ' ' || line[lscol] == '\t')) lscol++;
+                        if (lscol < trimmed_len) {
+                            int same_type = 0;
+                            if (cur->type == 1) {
+                                if (line[lscol] == '-' || line[lscol] == '*' || line[lscol] == '+') {
+                                    size_t la = lscol + 1;
+                                    if (la >= trimmed_len || line[la] == ' ' || line[la] == '\t') same_type = 1;
+                                }
+                            } else {
+                                size_t d_start = lscol;
+                                int num = 0, digit_count = 0;
+                                while (d_start < trimmed_len && isdigit((unsigned char)line[d_start]) && digit_count < 10) { num = num * 10 + (line[d_start] - '0'); d_start++; digit_count++; }
+                                if (digit_count > 0 && digit_count <= 9 && d_start < trimmed_len && (line[d_start] == '.' || line[d_start] == ')') && line[d_start] == cur->delimiter) {
+                                    same_type = 1;
+                                }
+                            }
+                            if (same_type) {
+                                /* Close current item, start a new sibling */
+                                cur->is_loose = 1;
+                                list_close_item(sb, li_content, cur);
+                                list_open_item(sb, cur);
+                                list_stack[list_depth - 1].content_col = (int)(lscol + 2);
+                                /* Skip to content after marker */
+                                size_t skip = lscol + 1;
+                                while (skip < trimmed_len && (line[skip] == ' ' || line[skip] == '\t')) skip++;
+                                if (skip < trimmed_len) {
+                                    process_list_content(sb, li_content, list_stack, &list_depth, line + skip, trimmed_len - skip, (int)skip, refs, n_refs);
+                                }
+                                p = line_end + 1;
+                                list_cont_handled = 1;
+                                break;
+                            }
                         }
+                        if (!cur->had_content) {
+                            list_pop_to(sb, li_content, list_stack, &list_depth, 0);
+                            goto fallback_paragraph;
+                        }
+                        if (extra_indent >= 4) {
+                            cur->had_content = 1;
+                            size_t target_col = (size_t)cur->content_col + 4;
+                            size_t consumed = 0, col = 0, leftover = 0;
+                            while (consumed < orig_line_len && col < target_col) {
+                                if (orig_line[consumed] == '\t') {
+                                    size_t next = (col + 4) & ~3;
+                                    if (next > target_col) {
+                                        leftover = target_col - col;
+                                        col = target_col;
+                                    } else {
+                                        col = next;
+                                    }
+                                    consumed++;
+                                } else if (orig_line[consumed] == ' ') {
+                                    col++; consumed++;
+                                } else break;
+                            }
+                            if (col > target_col) leftover = 0;
+                            in_indented_code = 1;
+                            ic_target_col = target_col;
+                            sb_append(sb, "<pre><code>");
+                            for (size_t k = 0; k < leftover; k++) sb_append_char(sb, ' ');
+                            escape_html(sb, orig_line + consumed, orig_line_len - consumed);
+                            sb_append(sb, "\n");
+                            cur->after_blank = 0;
+                        } else {
+                            cur->is_loose = 1;
+                            size_t scol = 0;
+                            while (scol < trimmed_len && (line[scol] == ' ' || line[scol] == '\t')) scol++;
+                            sb_append(sb, "<p>");
+                            render_inline(sb, line + scol, trimmed_len - scol, 1, 1, refs, n_refs);
+                            sb_append(sb, "</p>\n");
+                            cur->after_blank = 0;
+                        }
+                    } else if (li_content->len == 0 && extra_indent >= 4) {
+                        cur->had_content = 1;
                         size_t target_col = (size_t)cur->content_col + 4;
                         size_t consumed = 0, col = 0, leftover = 0;
                         while (consumed < orig_line_len && col < target_col) {
@@ -1907,19 +2216,77 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                             } else break;
                         }
                         if (col > target_col) leftover = 0;
+                        in_indented_code = 1;
+                        ic_target_col = target_col;
+                        sb_append_char(sb, '\n');
                         sb_append(sb, "<pre><code>");
                         for (size_t k = 0; k < leftover; k++) sb_append_char(sb, ' ');
                         escape_html(sb, orig_line + consumed, orig_line_len - consumed);
-                        sb_append(sb, "\n</code></pre>\n");
+                        sb_append(sb, "\n");
                         cur->after_blank = 0;
-                    } else if (cur->after_blank) {
-                        cur->after_blank = 0;
+                    } else if (cur->after_blank && (extra_indent >= 4 || (cur->first_block_code && line_indent >= (size_t)cur->min_content_col + 4))) {
+                        cur->had_content = 1;
                         if (li_content->len > 0) {
                             cur->is_loose = 1;
-                            sb_append(sb, "\n<p>");
+                            if (sb->len == 0 || sb->data[sb->len - 1] != '\n') sb_append_char(sb, '\n');
+                            sb_append(sb, "<p>");
                             sb_append_n(sb, li_content->data, li_content->len);
                             sb_append(sb, "</p>\n");
                             li_content->len = 0;
+                        }
+                        size_t target_col = extra_indent >= 4 ? (size_t)cur->content_col + 4 : (size_t)cur->min_content_col + 4;
+                        size_t consumed = 0, col = 0, leftover = 0;
+                        while (consumed < orig_line_len && col < target_col) {
+                            if (orig_line[consumed] == '\t') {
+                                size_t next = (col + 4) & ~3;
+                                if (next > target_col) {
+                                    leftover = target_col - col;
+                                    col = target_col;
+                                } else {
+                                    col = next;
+                                }
+                                consumed++;
+                            } else if (orig_line[consumed] == ' ') {
+                                col++; consumed++;
+                            } else break;
+                        }
+                        if (col > target_col) leftover = 0;
+                        in_indented_code = 1;
+                        ic_target_col = target_col;
+                        sb_append(sb, "<pre><code>");
+                        for (size_t k = 0; k < leftover; k++) sb_append_char(sb, ' ');
+                        escape_html(sb, orig_line + consumed, orig_line_len - consumed);
+                        sb_append(sb, "\n");
+                        cur->after_blank = 0;
+                    } else if (cur->after_blank) {
+                        cur->had_content = 1;
+                        cur->after_blank = 0;
+                        if (li_content->len > 0) {
+                            cur->is_loose = 1;
+                            if (sb->len == 0 || sb->data[sb->len - 1] != '\n') sb_append_char(sb, '\n');
+                            sb_append(sb, "<p>");
+                            sb_append_n(sb, li_content->data, li_content->len);
+                            sb_append(sb, "</p>\n");
+                            li_content->len = 0;
+                        }
+                        /* Check for reference definition inside list item */
+                        {
+                            RefDef rd;
+                            if (parse_ref_def(line, line_len, &rd)) {
+                                RefDef *existing = NULL;
+                                if (!find_ref(refs, n_refs, rd.label, rd.label_len, &existing)) {
+                                    if (n_refs >= cap_refs) {
+                                        int new_cap = cap_refs ? cap_refs * 2 : 8;
+                                        RefDef *new_refs = (RefDef *)realloc(refs, new_cap * sizeof(RefDef));
+                                        if (new_refs) { refs = new_refs; cap_refs = new_cap; }
+                                    }
+                                    if (n_refs < cap_refs) refs[n_refs++] = rd;
+                                    else ref_def_free(&rd);
+                                } else { ref_def_free(&rd); }
+                                p = line_end + 1;
+                                list_cont_handled = 1;
+                                break;
+                            }
                         }
                         size_t scol = 0;
                         while (scol < trimmed_len && (line[scol] == ' ' || line[scol] == '\t')) scol++;
@@ -1929,8 +2296,8 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                     } else {
                         size_t scol = 0;
                         while (scol < trimmed_len && (line[scol] == ' ' || line[scol] == '\t')) scol++;
-                        if (li_content->len > 0 && scol > 0) sb_append_char(li_content, '\n');
-                        if (scol < trimmed_len) render_inline(li_content, line + scol, trimmed_len - scol, 1, 1, refs, n_refs);
+                        if (li_content->len > 0 && scol < trimmed_len) sb_append_char(li_content, '\n');
+                        if (scol < trimmed_len) { cur->had_content = 1; render_inline(li_content, line + scol, trimmed_len - scol, 1, 1, refs, n_refs); }
                     }
                     p = line_end + 1;
                     list_cont_handled = 1;
@@ -1943,16 +2310,44 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                     if (p_indent >= (size_t)parent->content_col) { list_pop(sb, li_content, list_stack, &list_depth); continue; }
                 }
 
-                if (cur->item_open && !cur->after_blank && list_depth == 1) {
-                    size_t scol = 0;
-                    while (scol < trimmed_len && (line[scol] == ' ' || line[scol] == '\t')) scol++;
-                    if (li_content->len > 0 && scol > 0) sb_append_char(li_content, '\n');
-                    if (scol < trimmed_len) render_inline(li_content, line + scol, trimmed_len - scol, 1, 1, refs, n_refs);
-                    p = line_end + 1;
-                    list_cont_handled = 1;
-                    break;
+                if (cur->item_open && list_depth == 1) {
+                    if (cur->after_blank) {
+                        if ((cur->first_block_code && line_indent >= (size_t)cur->min_content_col) ||
+                            line_indent >= (size_t)cur->content_col) {
+                            size_t scol = 0;
+                            while (scol < trimmed_len && (line[scol] == ' ' || line[scol] == '\t')) scol++;
+                            if (li_content->len > 0 && scol < trimmed_len) sb_append_char(li_content, '\n');
+                            if (scol < trimmed_len) render_inline(li_content, line + scol, trimmed_len - scol, 1, 1, refs, n_refs);
+                            p = line_end + 1;
+                            list_cont_handled = 1;
+                            break;
+                        }
+                    } else {
+                        size_t scol = 0;
+                        while (scol < trimmed_len && (line[scol] == ' ' || line[scol] == '\t')) scol++;
+                        if (li_content->len > 0 && scol < trimmed_len) sb_append_char(li_content, '\n');
+                        if (scol < trimmed_len) render_inline(li_content, line + scol, trimmed_len - scol, 1, 1, refs, n_refs);
+                        p = line_end + 1;
+                        list_cont_handled = 1;
+                        break;
+                    }
                 }
 
+                /* Check for HTML block start (e.g. <!-- --> between list items) */
+                {
+                    int hb_check = is_html_block_start(line, trimmed_len);
+                    if (hb_check > 0) {
+                        list_pop_to(sb, li_content, list_stack, &list_depth, 0);
+                        in_html_block = 1;
+                        html_block_type = hb_check;
+                        sb_append_n(sb, line, line_len);
+                        sb_append_char(sb, '\n');
+                        if (hb_check == 2 && nstrstr(line, trimmed_len, "-->")) in_html_block = 0;
+                        p = line_end + 1;
+                        list_cont_handled = 1;
+                        break;
+                    }
+                }
                 list_pop_to(sb, li_content, list_stack, &list_depth, 0);
                 goto fallback_paragraph;
             }
@@ -2007,6 +2402,18 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
         }
 
 fallback_paragraph:
+        if (list_depth == 0 && !para_has_content && !in_blockquote && !in_fence && !in_indented_code && !in_html_block) {
+            size_t fb_indent = get_indent_tab(line, line_len);
+            if (fb_indent >= 4) {
+                in_indented_code = 1;
+                sb_append(sb, "<pre><code>");
+                size_t fb_content = content_start_at_col(orig_line, orig_line_len, 4);
+                escape_html(sb, orig_line + fb_content, orig_line_len - fb_content);
+                sb_append(sb, "\n");
+                p = line_end + 1;
+                continue;
+            }
+        }
         if (para_has_content && (para_buf->len == 0 || para_buf->data[para_buf->len - 1] != '\n')) sb_append_char(para_buf, '\n');
         para_has_content = 1;
 
@@ -2033,9 +2440,9 @@ fallback_paragraph:
         render_inline(sb, para_buf->data, para_buf->len, 1, 1, refs, n_refs);
         sb_append(sb, "</p>\n");
     }
+    if (in_indented_code) { in_indented_code = 0; sb_append(sb, "</code></pre>\n"); }
+    if (in_fence) { in_fence = 0; sb_append(sb, "</code></pre>\n"); }
     list_pop_to(sb, li_content, list_stack, &list_depth, 0);
-    if (in_fence) sb_append(sb, "</code></pre>\n");
-    if (in_indented_code) sb_append(sb, "</code></pre>\n");
 
     free(expanded_line);
     sb_free(para_buf);
