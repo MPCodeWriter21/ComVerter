@@ -60,6 +60,7 @@ Code conventions
 - Python code is minimal — the C extension does the work
 - Tests use `pytest`
 - CI runs on GitHub Actions across Python 3.10–3.14
+- Docstrings use reStructuredText (Sphinx) format
 
 Documentation
 -------------

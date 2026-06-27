@@ -69,24 +69,30 @@ static PyObject *_comverter_markdown_to_html(
 static PyMethodDef _comverter_methods[] = {
     {"markdown_to_html", (PyCFunction)_comverter_markdown_to_html,
      METH_VARARGS | METH_KEYWORDS,
-     "Convert Markdown text to HTML.\n\n"
-     "Implements the CommonMark 0.31.2 spec and GitHub Flavored Markdown.\n\n"
-     "Args:\n"
-     "    markdown (str): The Markdown string to convert.\n"
-     "    extensions (list, optional): GFM extensions to enable.\n"
-     "        Supported values: \"tagfilter\", \"autolink\".\n"
-     "Returns:\n"
-     "    str: The resulting HTML string.\n"
-     "Raises:\n"
-     "    TypeError: If the input is not a string.\n"
-     "    ValueError: If the input is invalid."                                   },
-    {              NULL,                                     NULL, 0,         NULL}
+     "Convert Markdown text to HTML.\n"
+     "\n"
+     "Implements the CommonMark 0.31.2 spec and GitHub Flavored Markdown.\n"
+     "\n"
+     ":param markdown: The Markdown text to convert.\n"
+     ":type markdown: str\n"
+     ":param extensions: Extensions to enable.\n"
+     "    Supported values:\n"
+     "\n"
+     "    - ``\"tagfilter\"`` - filter out certain HTML tags\n"
+     "    - ``\"autolink\"`` - auto-link URLs and email addresses\n"
+     ":type extensions: list of str, optional\n"
+     ":returns: The resulting HTML string.\n"
+     ":rtype: str\n"
+     ":raises TypeError: If the input is not a string.\n"
+     ":raises ValueError: If the input is invalid."                                   },
+    {              NULL,                                     NULL, 0,             NULL}
 };
 
 static PyModuleDef _comverter_module = {
     PyModuleDef_HEAD_INIT,
     .m_name = "_comverter",
-    .m_doc = "ComVerter internal C extension module for format conversion.",
+    .m_doc = "ComVerter C extension. Provides markdown_to_html() for converting\n"
+             "CommonMark/GFM Markdown to HTML.",
     .m_size = 0,
     .m_methods = _comverter_methods,
 };
