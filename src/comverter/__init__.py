@@ -1,5 +1,6 @@
 from comverter._comverter import markdown_to_html as _markdown_to_html
 
+
 def markdown_to_html(markdown, extensions=None):
     """Convert Markdown text to HTML.
 

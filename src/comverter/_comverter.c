@@ -1,8 +1,10 @@
 #define PY_SSIZE_T_CLEAN
-#include <Python.h>
 #include "md_core.h"
+#include <Python.h>
 
-static PyObject *_comverter_markdown_to_html(PyObject *module, PyObject *args, PyObject *kwargs) {
+static PyObject *_comverter_markdown_to_html(
+    PyObject *module, PyObject *args, PyObject *kwargs
+) {
     (void)module;
     const char *markdown;
     Py_ssize_t md_len;
@@ -10,11 +12,15 @@ static PyObject *_comverter_markdown_to_html(PyObject *module, PyObject *args, P
 
     static char *kwlist[] = {"markdown", "extensions", NULL};
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "s#|O", kwlist, &markdown, &md_len, &extensions))
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kwargs, "s#|O", kwlist, &markdown, &md_len, &extensions
+        ))
         return NULL;
 
     if (md_len < 0 || (markdown == NULL && md_len > 0)) {
-        PyErr_SetString(PyExc_ValueError, "Invalid input: markdown text must be a valid string.");
+        PyErr_SetString(
+            PyExc_ValueError, "Invalid input: markdown text must be a valid string."
+        );
         return NULL;
     }
 
@@ -33,7 +39,8 @@ static PyObject *_comverter_markdown_to_html(PyObject *module, PyObject *args, P
                     g_gfm_extensions |= GFM_ENABLE_AUTOLINK;
             }
         }
-    } else if (extensions && PyTuple_Check(extensions)) {
+    }
+    else if (extensions && PyTuple_Check(extensions)) {
         Py_ssize_t n = PyTuple_Size(extensions);
         for (Py_ssize_t i = 0; i < n; i++) {
             PyObject *item = PyTuple_GetItem(extensions, i);
@@ -49,7 +56,10 @@ static PyObject *_comverter_markdown_to_html(PyObject *module, PyObject *args, P
 
     char *result = markdown_to_html(markdown, (size_t)md_len);
     g_gfm_extensions = 0;
-    if (!result) { PyErr_NoMemory(); return NULL; }
+    if (!result) {
+        PyErr_NoMemory();
+        return NULL;
+    }
 
     PyObject *py_result = PyUnicode_FromString(result);
     free(result);
@@ -57,7 +67,8 @@ static PyObject *_comverter_markdown_to_html(PyObject *module, PyObject *args, P
 }
 
 static PyMethodDef _comverter_methods[] = {
-    {"markdown_to_html", (PyCFunction)_comverter_markdown_to_html, METH_VARARGS | METH_KEYWORDS,
+    {"markdown_to_html", (PyCFunction)_comverter_markdown_to_html,
+     METH_VARARGS | METH_KEYWORDS,
      "Convert Markdown text to HTML.\n\n"
      "Implements the CommonMark 0.31.2 spec and GitHub Flavored Markdown.\n\n"
      "Args:\n"
@@ -68,8 +79,8 @@ static PyMethodDef _comverter_methods[] = {
      "    str: The resulting HTML string.\n"
      "Raises:\n"
      "    TypeError: If the input is not a string.\n"
-     "    ValueError: If the input is invalid."},
-    {NULL, NULL, 0, NULL}
+     "    ValueError: If the input is invalid."                                   },
+    {              NULL,                                     NULL, 0,         NULL}
 };
 
 static PyModuleDef _comverter_module = {

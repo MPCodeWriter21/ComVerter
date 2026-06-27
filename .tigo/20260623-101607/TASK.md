@@ -1,6 +1,6 @@
 # Add pre-commit hooks
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 70
 - TAGS: code, tests, format, pre-commit
 

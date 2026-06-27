@@ -25,7 +25,9 @@ typedef struct {
     size_t closer_pos;
 } StrikeMatch;
 
-static int pos_inside_link(const char *text, size_t len, size_t pos, RefDef *refs, int n_refs) {
+static int pos_inside_link(
+    const char *text, size_t len, size_t pos, RefDef *refs, int n_refs
+) {
     size_t bracket = pos;
     while (bracket > 0 && text[bracket] != '[') {
         if (text[bracket] == '\\' && bracket > 0) bracket--;
@@ -35,9 +37,15 @@ static int pos_inside_link(const char *text, size_t len, size_t pos, RefDef *ref
     size_t close = bracket + 1;
     int depth = 1;
     while (close < len && depth > 0) {
-        if (text[close] == '\\' && close + 1 < len) { close += 2; continue; }
+        if (text[close] == '\\' && close + 1 < len) {
+            close += 2;
+            continue;
+        }
         if (text[close] == '[') depth++;
-        else if (text[close] == ']') { depth--; if (depth == 0) break; }
+        else if (text[close] == ']') {
+            depth--;
+            if (depth == 0) break;
+        }
         close++;
     }
     if (depth != 0 || close >= len) return 0;
@@ -49,7 +57,10 @@ static int pos_inside_link(const char *text, size_t len, size_t pos, RefDef *ref
                 size_t nc = ns + 1;
                 while (nc < close && nd > 0) {
                     if (text[nc] == '[') nd++;
-                    else if (text[nc] == ']') { nd--; if (nd == 0) break; }
+                    else if (text[nc] == ']') {
+                        nd--;
+                        if (nd == 0) break;
+                    }
                     nc++;
                 }
                 if (nd == 0 && nc < close) {
@@ -58,7 +69,8 @@ static int pos_inside_link(const char *text, size_t len, size_t pos, RefDef *ref
                         size_t p = nc + 2;
                         while (p < close && pd > 0) {
                             if (text[p] == '(') pd++;
-                            else if (text[p] == ')') pd--;
+                            else if (text[p] == ')')
+                                pd--;
                             if (pd > 0) p++;
                         }
                         if (pd == 0) return 0;
@@ -74,9 +86,14 @@ static int pos_inside_link(const char *text, size_t len, size_t pos, RefDef *ref
         int pd = 1;
         size_t k = close + 2;
         while (k < len && pd > 0) {
-            if (text[k] == '\\' && k + 1 < len && (text[k + 1] == '(' || text[k + 1] == ')')) { k += 2; continue; }
+            if (text[k] == '\\' && k + 1 < len &&
+                (text[k + 1] == '(' || text[k + 1] == ')')) {
+                k += 2;
+                continue;
+            }
             if (text[k] == '(') pd++;
-            else if (text[k] == ')') pd--;
+            else if (text[k] == ')')
+                pd--;
             k++;
         }
         if (pd == 0) return (pos >= bracket + 1 && pos < close) ? 1 : 0;
@@ -85,9 +102,13 @@ static int pos_inside_link(const char *text, size_t len, size_t pos, RefDef *ref
         size_t r = close + 2;
         int rd = 1;
         while (r < len && rd > 0) {
-            if (text[r] == '\\' && r + 1 < len) { r += 2; continue; }
+            if (text[r] == '\\' && r + 1 < len) {
+                r += 2;
+                continue;
+            }
             if (text[r] == '[') rd++;
-            else if (text[r] == ']') rd--;
+            else if (text[r] == ']')
+                rd--;
             r++;
         }
         if (rd == 0) return (pos >= bracket + 1 && pos < close) ? 1 : 0;
@@ -95,14 +116,12 @@ static int pos_inside_link(const char *text, size_t len, size_t pos, RefDef *ref
     if (bracket > 0 && text[bracket - 1] == '!') return 0;
     if (pos >= bracket + 1 && pos < close) {
         size_t after_close = close + 1;
-        if (after_close < len && text[after_close] == ']')
-            return 1;
+        if (after_close < len && text[after_close] == ']') return 1;
         if (refs && n_refs > 0) {
             const char *label = text + bracket + 1;
             size_t label_len = close - bracket - 1;
             RefDef *found = NULL;
-            if (find_ref(refs, n_refs, label, label_len, &found))
-                return 1;
+            if (find_ref(refs, n_refs, label, label_len, &found)) return 1;
         }
         return 0;
     }
@@ -117,31 +136,45 @@ static int pos_inside_raw_html_or_autolink(const char *text, size_t len, size_t 
     while (gt < len && text[gt] != '>') gt++;
     if (gt >= len) return 0;
     size_t consumed = 0;
-    if (is_html_tag(text + lt, len - lt, &consumed) && lt + consumed >= gt + 1) {
+    if (is_html_tag(text + lt, len - lt, &consumed) && lt + consumed >= gt + 1)
+        return (pos >= lt && pos <= gt) ? 1 : 0;
+    if (is_valid_uri_autolink(text + lt, len - lt, &consumed) && consumed > 0 &&
+        lt + consumed >= gt + 1) {
         return (pos >= lt && pos <= gt) ? 1 : 0;
     }
-    if (is_valid_uri_autolink(text + lt, len - lt, &consumed) && consumed > 0 && lt + consumed >= gt + 1) {
-        return (pos >= lt && pos <= gt) ? 1 : 0;
-    }
-    if (is_valid_email_autolink(text + lt, len - lt, &consumed) && consumed > 0 && lt + consumed >= gt + 1) {
+    if (is_valid_email_autolink(text + lt, len - lt, &consumed) && consumed > 0 &&
+        lt + consumed >= gt + 1) {
         return (pos >= lt && pos <= gt) ? 1 : 0;
     }
     return 0;
 }
 
-static int collect_delim_runs(const char *text, size_t len, DelimRun runs[], int max_runs, RefDef *refs, int n_refs) {
+static int collect_delim_runs(
+    const char *text,
+    size_t len,
+    DelimRun runs[],
+    int max_runs,
+    RefDef *refs,
+    int n_refs
+) {
     int n = 0;
     size_t pos = 0;
     while (pos < len && n < max_runs) {
-        if (text[pos] == '\\' && pos + 1 < len && (text[pos + 1] == '*' || text[pos + 1] == '_') && !is_backslash_escaped(text, len, pos)) {
-            pos += 2; continue;
+        if (text[pos] == '\\' && pos + 1 < len &&
+            (text[pos + 1] == '*' || text[pos + 1] == '_') &&
+            !is_backslash_escaped(text, len, pos)) {
+            pos += 2;
+            continue;
         }
         if (text[pos] == '*' || text[pos] == '_') {
             if (!pos_inside_code_span(text, len, pos)) {
                 char delim = text[pos];
                 size_t start = pos;
                 int run_len = 0;
-                while (pos < len && text[pos] == delim) { run_len++; pos++; }
+                while (pos < len && text[pos] == delim) {
+                    run_len++;
+                    pos++;
+                }
                 DelimRun *r = &runs[n++];
                 r->delim = delim;
                 r->pos = start;
@@ -153,7 +186,8 @@ static int collect_delim_runs(const char *text, size_t len, DelimRun runs[], int
                 if (inside_link || inside_raw) {
                     r->can_open = 0;
                     r->can_close = 0;
-                } else {
+                }
+                else {
                     r->can_open = is_left_flanking(text, len, start);
                     r->can_close = is_right_flanking(text, len, start);
                     if (delim == '_') {
@@ -171,8 +205,10 @@ static int collect_delim_runs(const char *text, size_t len, DelimRun runs[], int
                         r->can_close = right && (!left || followed_by_punct);
                     }
                 }
-            } else { pos++; }
-        } else { pos++; }
+            }
+            else { pos++; }
+        }
+        else { pos++; }
     }
     return n;
 }
@@ -188,22 +224,22 @@ static int is_entity_at(const char *text, size_t len, size_t pos) {
 
 /* Strip trailing ASCII punctuation, then balance parentheses.
    Returns the new end position (<= end). */
-static size_t autolink_strip_trailing(const char *text, size_t end, int has_leading_paren) {
-    while (end > 0 && strchr(".,;?!:-'\"", text[end - 1]))
-        end--;
+static size_t autolink_strip_trailing(
+    const char *text, size_t end, int has_leading_paren
+) {
+    while (end > 0 && strchr(".,;?!:-'\"", text[end - 1])) end--;
     /* Count parentheses to balance: strip extra closing parens */
     int open = 0;
-    for (size_t i = 0; i < end; i++) {
+    for (size_t i = 0; i < end; i++)
         if (text[i] == '(') open++;
-        else if (text[i] == ')') open--;
-    }
+        else if (text[i] == ')')
+            open--;
     /* If we have a leading '(' outside the URL, allow one extra ')' */
     if (has_leading_paren) open++;
     while (open < 0 && end > 0) {
         if (text[end - 1] != ')') break;
         end--;
-        while (end > 0 && strchr(".,;?!:-'\"", text[end - 1]))
-            end--;
+        while (end > 0 && strchr(".,;?!:-'\"", text[end - 1])) end--;
         open++;
     }
     return end;
@@ -215,15 +251,13 @@ static size_t autolink_scan_path(const char *text, size_t len, size_t start) {
     while (pos < len) {
         if (is_entity_at(text, len, pos)) break;
         unsigned char c = (unsigned char)text[pos];
-        if (isalnum(c) || c == '/' || c == '?' || c == '#' || c == '@' ||
-            c == ':' || c == '&' || c == '=' || c == '~' || c == '.' ||
-            c == '_' || c == '-' || c == '+' || c == '%' || c == '!' ||
-            c == '$' || c == '\'' || c == '(' || c == ')' || c == '*' ||
-            c == ',' || c == ';') {
+        if (isalnum(c) || c == '/' || c == '?' || c == '#' || c == '@' || c == ':' ||
+            c == '&' || c == '=' || c == '~' || c == '.' || c == '_' || c == '-' ||
+            c == '+' || c == '%' || c == '!' || c == '$' || c == '\'' || c == '(' ||
+            c == ')' || c == '*' || c == ',' || c == ';') {
             pos++;
-        } else {
-            break;
         }
+        else { break; }
     }
     return pos;
 }
@@ -235,24 +269,19 @@ static int is_valid_www_autolink(const char *text, size_t len, size_t *consumed)
     size_t pos = 4;
     int has_dot = 0;
 
-    if (pos >= len || !isalnum((unsigned char)text[pos]))
-        return 0;
+    if (pos >= len || !isalnum((unsigned char)text[pos])) return 0;
     pos++;
 
     while (pos < len) {
         unsigned char c = (unsigned char)text[pos];
         if (c == '.') {
-            if (!isalnum((unsigned char)text[pos - 1]))
-                return 0;
-            if (pos + 1 >= len || !isalnum((unsigned char)text[pos + 1]))
-                break;
+            if (!isalnum((unsigned char)text[pos - 1])) return 0;
+            if (pos + 1 >= len || !isalnum((unsigned char)text[pos + 1])) break;
             has_dot = 1;
             pos++;
-        } else if (isalnum(c) || c == '-') {
-            pos++;
-        } else {
-            break;
         }
+        else if (isalnum(c) || c == '-') { pos++; }
+        else { break; }
     }
 
     if (!has_dot) return 0;
@@ -263,11 +292,10 @@ static int is_valid_www_autolink(const char *text, size_t len, size_t *consumed)
     pos = autolink_scan_path(text, len, pos);
 
     int has_leading_paren = 0;
-    if (pos > 4 && text[4] == '(') { has_leading_paren = 1; }
+    if (pos > 4 && text[4] == '(') has_leading_paren = 1;
     pos = autolink_strip_trailing(text, pos, has_leading_paren);
 
-    while (pos > 0 && strchr(".-_?=!$'(*+,;&", text[pos - 1]))
-        pos--;
+    while (pos > 0 && strchr(".-_?=!$'(*+,;&", text[pos - 1])) pos--;
 
     if (pos <= 4) return 0;
 
@@ -304,16 +332,16 @@ static int is_valid_uri_autolink_raw(const char *text, size_t len, size_t *consu
    If so, return 1 and set *consumed to the full length including >.
    The tag is output with &lt; instead of < but > is kept as-is. */
 static int is_disallowed_html_tag(const char *text, size_t len, size_t *consumed) {
-    static const char *disallowed[] = {
-        "title", "textarea", "style", "xmp", "pre", "script",
-        "iframe", "noembed", "noframes", "noscript", "plaintext", NULL
-    };
+    static const char *disallowed[] = {"title",    "textarea", "style",     "xmp",
+                                       "pre",      "script",   "iframe",    "noembed",
+                                       "noframes", "noscript", "plaintext", NULL};
     if (len < 2 || text[0] != '<') return 0;
     size_t start = 1;
-    if (start < len && text[start] == '/') { start++; }
+    if (start < len && text[start] == '/') start++;
     if (start >= len || !isalpha((unsigned char)text[start])) return 0;
     size_t name_end = start;
-    while (name_end < len && (isalnum((unsigned char)text[name_end]) || text[name_end] == '-'))
+    while (name_end < len &&
+           (isalnum((unsigned char)text[name_end]) || text[name_end] == '-'))
         name_end++;
     size_t name_len = name_end - start;
     if (name_len == 0) return 0;
@@ -324,8 +352,14 @@ static int is_disallowed_html_tag(const char *text, size_t len, size_t *consumed
         if (name_len == dl) {
             int m = 1;
             for (size_t ci = 0; ci < dl; ci++)
-                if (tolower((unsigned char)text[start + ci]) != disallowed[di][ci]) { m = 0; break; }
-            if (m) { matched = 1; break; }
+                if (tolower((unsigned char)text[start + ci]) != disallowed[di][ci]) {
+                    m = 0;
+                    break;
+                }
+            if (m) {
+                matched = 1;
+                break;
+            }
         }
     }
     if (!matched) return 0;
@@ -337,21 +371,22 @@ static int is_disallowed_html_tag(const char *text, size_t len, size_t *consumed
     return 1;
 }
 
-static int is_valid_email_autolink_nobracket(const char *text, size_t len, size_t *consumed) {
+static int is_valid_email_autolink_nobracket(
+    const char *text, size_t len, size_t *consumed
+) {
     if (len == 0 || len > 254) return 0;
 
     size_t end = 0;
     while (end < len) {
         unsigned char c = (unsigned char)text[end];
-        if (isalnum(c) || c == '.' || c == '%' || c == '+' || c == '-' || c == '_' || c == '@') {
+        if (isalnum(c) || c == '.' || c == '%' || c == '+' || c == '-' || c == '_' ||
+            c == '@') {
             end++;
-        } else {
-            break;
         }
+        else { break; }
     }
 
-    while (end > 0 && text[end - 1] == '.')
-        end--;
+    while (end > 0 && text[end - 1] == '.') end--;
 
     size_t scan_len = end;
     if (scan_len == 0) return 0;
@@ -370,7 +405,8 @@ static int is_valid_email_autolink_nobracket(const char *text, size_t len, size_
     if (text[0] == '.') return 0;
     for (size_t i = 0; i < local_len; i++) {
         unsigned char c = (unsigned char)text[i];
-        if (!isalnum(c) && c != '.' && c != '%' && c != '+' && c != '-' && c != '_') return 0;
+        if (!isalnum(c) && c != '.' && c != '%' && c != '+' && c != '-' && c != '_')
+            return 0;
         if (c == '.' && (i + 1 >= local_len || text[i + 1] == '.')) return 0;
     }
 
@@ -391,7 +427,15 @@ static int is_valid_email_autolink_nobracket(const char *text, size_t len, size_
     return 1;
 }
 
-static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, int allow_emphasis, int allow_links, RefDef *refs, int n_refs) {
+static void render_inline_impl(
+    StringBuilder *sb,
+    const char *text,
+    size_t len,
+    int allow_emphasis,
+    int allow_links,
+    RefDef *refs,
+    int n_refs
+) {
     DelimRun runs[MAX_RUNS];
     int n_runs = 0;
     int next_run = 0;
@@ -409,11 +453,15 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
             size_t sp = 0;
             while (sp + 1 < len && n_strike < MAX_STRIKE) {
                 int found_strike = 0;
-                if (text[sp] == '~' && text[sp + 1] == '~' && !pos_inside_code_span(text, len, sp) && !is_backslash_escaped(text, len, sp)) {
+                if (text[sp] == '~' && text[sp + 1] == '~' &&
+                    !pos_inside_code_span(text, len, sp) &&
+                    !is_backslash_escaped(text, len, sp)) {
                     if (sp == 0 || text[sp - 1] != '~') {
                         size_t cp = sp + 2;
                         while (cp + 1 < len) {
-                            if (text[cp] == '~' && text[cp + 1] == '~' && !pos_inside_code_span(text, len, cp) && !is_backslash_escaped(text, len, cp)) {
+                            if (text[cp] == '~' && text[cp + 1] == '~' &&
+                                !pos_inside_code_span(text, len, cp) &&
+                                !is_backslash_escaped(text, len, cp)) {
                                 strike_matches[n_strike].opener_pos = sp;
                                 strike_matches[n_strike].closer_pos = cp;
                                 n_strike++;
@@ -458,7 +506,8 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                         int closer_can_both = cl->can_open && cl->can_close;
                         if (opener_can_both || closer_can_both) {
                             int sum = remaining_op + remaining_cl;
-                            if (sum % 3 == 0 && !(remaining_op % 3 == 0 && remaining_cl % 3 == 0)) {
+                            if (sum % 3 == 0 &&
+                                !(remaining_op % 3 == 0 && remaining_cl % 3 == 0)) {
                                 continue;
                             }
                         }
@@ -469,7 +518,8 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                 if (found < 0) {
                     if (!cl->can_open) {
                         if (cl->delim == '*') ob_star = ri + 1;
-                        else ob_und = ri + 1;
+                        else
+                            ob_und = ri + 1;
                     }
                     break;
                 }
@@ -491,9 +541,8 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                     n_matches++;
                 }
 
-                if (op->used_open + op->used_close >= op->len) {
-                    sp = found;
-                } else {
+                if (op->used_open + op->used_close >= op->len) { sp = found; }
+                else {
                     for (int si = found; si < sp - 1; si++) stack[si] = stack[si + 1];
                     sp--;
                     stack[sp++] = oi;
@@ -508,25 +557,21 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
     size_t i = 0;
 
     while (i < len) {
-        if (allow_emphasis) {
+        if (allow_emphasis)
             while (next_run < n_runs && runs[next_run].pos < i) next_run++;
-        }
         if (allow_emphasis && next_run < n_runs && i == runs[next_run].pos) {
             DelimRun *r = &runs[next_run];
             /* Emit closing tags: matches where this run is closer, in forward order */
-            for (int mi = 0; mi < n_matches; mi++) {
+            for (int mi = 0; mi < n_matches; mi++)
                 if (matches[mi].closer_run == next_run)
                     sb_append(sb, matches[mi].is_strong ? "</strong>" : "</em>");
-            }
             /* Emit unused delimiter chars as literal text */
             int unused = r->len - r->used_open - r->used_close;
-            for (int k = 0; k < unused; k++)
-                sb_append_char(sb, r->delim);
+            for (int k = 0; k < unused; k++) sb_append_char(sb, r->delim);
             /* Emit opening tags: matches where this run is opener, in reverse order */
-            for (int mi = n_matches - 1; mi >= 0; mi--) {
+            for (int mi = n_matches - 1; mi >= 0; mi--)
                 if (matches[mi].opener_run == next_run)
                     sb_append(sb, matches[mi].is_strong ? "<strong>" : "<em>");
-            }
             i += r->len;
             next_run++;
             continue;
@@ -556,7 +601,8 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
             if (next == '\n') {
                 sb_append(sb, "<br />\n");
                 i += 2;
-            } else if (strchr("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", next)) {
+            }
+            else if (strchr("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", next)) {
                 switch (next) {
                     case '&': sb_append(sb, "&amp;"); break;
                     case '<': sb_append(sb, "&lt;"); break;
@@ -565,7 +611,8 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                     default: sb_append_char(sb, next); break;
                 }
                 i += 2;
-            } else {
+            }
+            else {
                 sb_append_char(sb, text[i]);
                 i++;
             }
@@ -576,7 +623,10 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
             size_t start = i;
             i++;
             int opener_ticks = 1;
-            while (i < len && text[i] == '`') { opener_ticks++; i++; }
+            while (i < len && text[i] == '`') {
+                opener_ticks++;
+                i++;
+            }
             size_t content_start = i;
             int found = 0;
             size_t j = i;
@@ -584,7 +634,10 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                 if (text[j] == '`') {
                     size_t k = j;
                     int closer_ticks = 0;
-                    while (k < len && text[k] == '`') { closer_ticks++; k++; }
+                    while (k < len && text[k] == '`') {
+                        closer_ticks++;
+                        k++;
+                    }
                     if (closer_ticks == opener_ticks) {
                         size_t content_end = j;
                         char norm[1024];
@@ -592,16 +645,22 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                         size_t max_norm = sizeof(norm);
                         if (content_end - content_start > max_norm) max_norm = 0;
                         int all_spaces = 1;
-                        for (size_t m = content_start; m < content_end && norm_len < max_norm; m++) {
+                        for (size_t m = content_start;
+                             m < content_end && norm_len < max_norm; m++) {
                             if (text[m] == '\r') {
                                 if (m + 1 < content_end && text[m + 1] == '\n') m++;
                                 norm[norm_len++] = ' ';
-                            } else if (text[m] == '\n') { norm[norm_len++] = ' '; }
-                            else { norm[norm_len++] = text[m]; if (text[m] != ' ') all_spaces = 0; }
+                            }
+                            else if (text[m] == '\n') { norm[norm_len++] = ' '; }
+                            else {
+                                norm[norm_len++] = text[m];
+                                if (text[m] != ' ') all_spaces = 0;
+                            }
                         }
                         size_t strip_start = 0;
                         size_t strip_end = norm_len;
-                        if (norm_len > 1 && norm[0] == ' ' && norm[norm_len - 1] == ' ' && !all_spaces) {
+                        if (norm_len > 1 && norm[0] == ' ' &&
+                            norm[norm_len - 1] == ' ' && !all_spaces) {
                             strip_start = 1;
                             strip_end = norm_len - 1;
                         }
@@ -616,10 +675,13 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                             }
                         }
                         sb_append(sb, "</code>");
-                        i = k; found = 1; break;
+                        i = k;
+                        found = 1;
+                        break;
                     }
                     j = k;
-                } else { j++; }
+                }
+                else { j++; }
             }
             if (!found)
                 for (size_t m = start; m < i; m++) sb_append_char(sb, text[m]);
@@ -638,7 +700,8 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                 while (sb->len > 0 && sb->data[sb->len - 1] == ' ') sb->len--;
                 sb->data[sb->len] = '\0';
                 sb_append(sb, "<br />\n");
-            } else {
+            }
+            else {
                 while (sb->len > 0 && sb->data[sb->len - 1] == ' ') sb->len--;
                 sb->data[sb->len] = '\0';
                 sb_append(sb, "\n");
@@ -653,15 +716,30 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
             int depth = 1;
             size_t alt_end = 0;
             while (j < len && depth > 0) {
-                if (is_backslash_escaped(text, len, j)) { j++; continue; }
+                if (is_backslash_escaped(text, len, j)) {
+                    j++;
+                    continue;
+                }
                 if (text[j] == '<') {
                     size_t tc = 0;
-                    if (is_html_tag(text + j, len - j, &tc)) { j += tc; continue; }
-                    if (is_valid_uri_autolink(text + j, len - j, &tc)) { j += tc; continue; }
-                    if (is_valid_email_autolink(text + j, len - j, &tc)) { j += tc; continue; }
+                    if (is_html_tag(text + j, len - j, &tc)) {
+                        j += tc;
+                        continue;
+                    }
+                    if (is_valid_uri_autolink(text + j, len - j, &tc)) {
+                        j += tc;
+                        continue;
+                    }
+                    if (is_valid_email_autolink(text + j, len - j, &tc)) {
+                        j += tc;
+                        continue;
+                    }
                 }
                 if (text[j] == '[') depth++;
-                else if (text[j] == ']') { depth--; if (depth == 0) alt_end = j; }
+                else if (text[j] == ']') {
+                    depth--;
+                    if (depth == 0) alt_end = j;
+                }
                 j++;
             }
             if (alt_end > 0 && pos_inside_code_span(text, len, alt_end)) alt_end = 0;
@@ -681,18 +759,31 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                         if (k < len) k++;
                         continue;
                     }
-                    if (text[k] == '\\' && k + 1 < len && (text[k + 1] == '(' || text[k + 1] == ')' || text[k + 1] == '\\')) { k += 2; continue; }
+                    if (text[k] == '\\' && k + 1 < len &&
+                        (text[k + 1] == '(' || text[k + 1] == ')' || text[k + 1] == '\\'
+                        )) {
+                        k += 2;
+                        continue;
+                    }
                     if (text[k] == '(') pdepth++;
-                    else if (text[k] == ')') { pdepth--; if (pdepth == 0) url_end = k; }
+                    else if (text[k] == ')') {
+                        pdepth--;
+                        if (pdepth == 0) url_end = k;
+                    }
                     k++;
                 }
                 if (url_end > 0) {
                     size_t dest_start, dest_len, title_s, title_len;
-                    if (parse_link_dest_title(text, paren_start, url_end, &dest_start, &dest_len, &title_s, &title_len)) {
+                    if (parse_link_dest_title(
+                            text, paren_start, url_end, &dest_start, &dest_len,
+                            &title_s, &title_len
+                        )) {
                         sb_append(sb, "<img src=\"");
                         append_url_with_entities(sb, text + dest_start, dest_len);
                         sb_append(sb, "\" alt=\"");
-                        render_alt_text(sb, text + link_start, alt_end - link_start, refs, n_refs);
+                        render_alt_text(
+                            sb, text + link_start, alt_end - link_start, refs, n_refs
+                        );
                         sb_append(sb, "\"");
                         if (title_len > 0) {
                             sb_append(sb, " title=\"");
@@ -713,13 +804,20 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                     size_t r = alt_end + 2;
                     int ref_depth = 1;
                     while (r < len && ref_depth > 0) {
-                        if (is_backslash_escaped(text, len, r)) { r++; continue; }
+                        if (is_backslash_escaped(text, len, r)) {
+                            r++;
+                            continue;
+                        }
                         if (text[r] == '[') ref_depth++;
-                        else if (text[r] == ']') { ref_depth--; if (ref_depth == 0) ref_end = r; }
+                        else if (text[r] == ']') {
+                            ref_depth--;
+                            if (ref_depth == 0) ref_end = r;
+                        }
                         r++;
                     }
                     if (ref_end == alt_end + 2) is_collapsed = 1;
-                } else {
+                }
+                else {
                     ref_end = alt_end;
                     is_collapsed = 1;
                     is_shortcut = 1;
@@ -730,19 +828,27 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                     if (is_collapsed) {
                         search_start = link_start;
                         search_len = alt_end - link_start;
-                    } else {
+                    }
+                    else {
                         search_start = alt_end + 2;
                         search_len = ref_end - (alt_end + 2);
                     }
-                    if (search_len > 0 && find_ref(refs, n_refs, text + search_start, search_len, &found)) {
+                    if (search_len > 0 &&
+                        find_ref(
+                            refs, n_refs, text + search_start, search_len, &found
+                        )) {
                         sb_append(sb, "<img src=\"");
                         append_url_with_entities(sb, found->url, strlen(found->url));
                         sb_append(sb, "\" alt=\"");
-                        render_alt_text(sb, text + link_start, alt_end - link_start, refs, n_refs);
+                        render_alt_text(
+                            sb, text + link_start, alt_end - link_start, refs, n_refs
+                        );
                         sb_append(sb, "\"");
                         if (found->title) {
                             sb_append(sb, " title=\"");
-                            append_entity_decoded(sb, found->title, strlen(found->title));
+                            append_entity_decoded(
+                                sb, found->title, strlen(found->title)
+                            );
                             sb_append_char(sb, '"');
                         }
                         sb_append(sb, " />");
@@ -759,15 +865,30 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
             int depth = 1;
             size_t text_end = 0;
             while (j < len && depth > 0) {
-                if (is_backslash_escaped(text, len, j)) { j++; continue; }
+                if (is_backslash_escaped(text, len, j)) {
+                    j++;
+                    continue;
+                }
                 if (text[j] == '<') {
                     size_t tc = 0;
-                    if (is_html_tag(text + j, len - j, &tc)) { j += tc; continue; }
-                    if (is_valid_uri_autolink(text + j, len - j, &tc)) { j += tc; continue; }
-                    if (is_valid_email_autolink(text + j, len - j, &tc)) { j += tc; continue; }
+                    if (is_html_tag(text + j, len - j, &tc)) {
+                        j += tc;
+                        continue;
+                    }
+                    if (is_valid_uri_autolink(text + j, len - j, &tc)) {
+                        j += tc;
+                        continue;
+                    }
+                    if (is_valid_email_autolink(text + j, len - j, &tc)) {
+                        j += tc;
+                        continue;
+                    }
                 }
                 if (text[j] == '[') depth++;
-                else if (text[j] == ']') { depth--; if (depth == 0) text_end = j; }
+                else if (text[j] == ']') {
+                    depth--;
+                    if (depth == 0) text_end = j;
+                }
                 j++;
             }
             if (text_end > 0 && pos_inside_code_span(text, len, text_end)) text_end = 0;
@@ -777,12 +898,18 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                 while (ns < text_end) {
                     if (text[ns] == '[') {
                         /* Skip ![ for images — images inside links are valid */
-                        if (ns > link_start && text[ns - 1] == '!') { ns++; continue; }
+                        if (ns > link_start && text[ns - 1] == '!') {
+                            ns++;
+                            continue;
+                        }
                         int nd = 1;
                         size_t nc = ns + 1;
                         while (nc < text_end && nd > 0) {
                             if (text[nc] == '[') nd++;
-                            else if (text[nc] == ']') { nd--; if (nd == 0) break; }
+                            else if (text[nc] == ']') {
+                                nd--;
+                                if (nd == 0) break;
+                            }
                             nc++;
                         }
                         if (nd == 0 && nc < text_end) {
@@ -791,12 +918,19 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                                 size_t p = nc + 2;
                                 while (p < text_end && pd > 0) {
                                     if (text[p] == '(') pd++;
-                                    else if (text[p] == ')') pd--;
+                                    else if (text[p] == ')')
+                                        pd--;
                                     if (pd > 0) p++;
                                 }
-                                if (pd == 0) { text_end = 0; break; }
+                                if (pd == 0) {
+                                    text_end = 0;
+                                    break;
+                                }
                             }
-                            if (nc + 1 < text_end && text[nc + 1] == '[') { text_end = 0; break; }
+                            if (nc + 1 < text_end && text[nc + 1] == '[') {
+                                text_end = 0;
+                                break;
+                            }
                         }
                     }
                     ns++;
@@ -818,14 +952,25 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                         if (k < len) k++;
                         continue;
                     }
-                    if (text[k] == '\\' && k + 1 < len && (text[k + 1] == '(' || text[k + 1] == ')' || text[k + 1] == '\\')) { k += 2; continue; }
+                    if (text[k] == '\\' && k + 1 < len &&
+                        (text[k + 1] == '(' || text[k + 1] == ')' || text[k + 1] == '\\'
+                        )) {
+                        k += 2;
+                        continue;
+                    }
                     if (text[k] == '(') pdepth++;
-                    else if (text[k] == ')') { pdepth--; if (pdepth == 0) url_end = k; }
+                    else if (text[k] == ')') {
+                        pdepth--;
+                        if (pdepth == 0) url_end = k;
+                    }
                     k++;
                 }
                 if (url_end > 0) {
                     size_t dest_start, dest_len, title_s, title_len;
-                    if (parse_link_dest_title(text, paren_start, url_end, &dest_start, &dest_len, &title_s, &title_len)) {
+                    if (parse_link_dest_title(
+                            text, paren_start, url_end, &dest_start, &dest_len,
+                            &title_s, &title_len
+                        )) {
                         sb_append(sb, "<a href=\"");
                         append_url_with_entities(sb, text + dest_start, dest_len);
                         sb_append(sb, "\"");
@@ -835,7 +980,10 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                             sb_append_char(sb, '"');
                         }
                         sb_append(sb, ">");
-                        render_inline(sb, text + link_start, text_end - link_start, 1, 0, refs, n_refs);
+                        render_inline(
+                            sb, text + link_start, text_end - link_start, 1, 0, refs,
+                            n_refs
+                        );
                         sb_append(sb, "</a>");
                         i = url_end + 1;
                         while (next_run < n_runs && runs[next_run].pos < i) next_run++;
@@ -851,13 +999,20 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                     size_t r = text_end + 2;
                     int ref_depth = 1;
                     while (r < len && ref_depth > 0) {
-                        if (is_backslash_escaped(text, len, r)) { r++; continue; }
+                        if (is_backslash_escaped(text, len, r)) {
+                            r++;
+                            continue;
+                        }
                         if (text[r] == '[') ref_depth++;
-                        else if (text[r] == ']') { ref_depth--; if (ref_depth == 0) ref_end = r; }
+                        else if (text[r] == ']') {
+                            ref_depth--;
+                            if (ref_depth == 0) ref_end = r;
+                        }
                         r++;
                     }
                     if (ref_end == text_end + 2) is_collapsed = 1;
-                } else {
+                }
+                else {
                     ref_end = text_end;
                     is_collapsed = 1;
                     is_shortcut = 1;
@@ -868,21 +1023,30 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                     if (is_collapsed || is_shortcut) {
                         search_start = link_start;
                         search_len = text_end - link_start;
-                    } else {
+                    }
+                    else {
                         search_start = text_end + 2;
                         search_len = ref_end - (text_end + 2);
                     }
-                    if (search_len > 0 && find_ref(refs, n_refs, text + search_start, search_len, &found)) {
+                    if (search_len > 0 &&
+                        find_ref(
+                            refs, n_refs, text + search_start, search_len, &found
+                        )) {
                         sb_append(sb, "<a href=\"");
                         append_url_with_entities(sb, found->url, strlen(found->url));
                         sb_append(sb, "\"");
                         if (found->title) {
                             sb_append(sb, " title=\"");
-                            append_entity_decoded(sb, found->title, strlen(found->title));
+                            append_entity_decoded(
+                                sb, found->title, strlen(found->title)
+                            );
                             sb_append_char(sb, '"');
                         }
                         sb_append(sb, ">");
-                        render_inline(sb, text + link_start, text_end - link_start, 1, 0, refs, n_refs);
+                        render_inline(
+                            sb, text + link_start, text_end - link_start, 1, 0, refs,
+                            n_refs
+                        );
                         sb_append(sb, "</a>");
                         i = ref_end + 1;
                         continue;
@@ -914,12 +1078,14 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                 for (size_t ui = 0; ui < uri_len; ui++) {
                     unsigned char uc = (unsigned char)uri[ui];
                     if (uc == '&') sb_append(sb, "&amp;");
-                    else append_uri_encoded(sb, uc);
+                    else
+                        append_uri_encoded(sb, uc);
                 }
                 sb_append(sb, "\">");
                 for (size_t ui = 0; ui < uri_len; ui++)
                     if (uri[ui] == '&') sb_append(sb, "&amp;");
-                    else sb_append_char(sb, uri[ui]);
+                    else
+                        sb_append_char(sb, uri[ui]);
                 sb_append(sb, "</a>");
                 i += tag_consumed;
                 continue;
@@ -931,13 +1097,15 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                 for (size_t ei = 0; ei < email_len; ei++) {
                     unsigned char c = (unsigned char)email[ei];
                     if (c == '&') sb_append(sb, "&amp;");
-                    else sb_append_char(sb, email[ei]);
+                    else
+                        sb_append_char(sb, email[ei]);
                 }
                 sb_append(sb, "\">");
                 for (size_t ei = 0; ei < email_len; ei++) {
                     unsigned char c = (unsigned char)email[ei];
                     if (c == '&') sb_append(sb, "&amp;");
-                    else sb_append_char(sb, email[ei]);
+                    else
+                        sb_append_char(sb, email[ei]);
                 }
                 sb_append(sb, "</a>");
                 i += tag_consumed;
@@ -948,7 +1116,8 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                 i += tag_consumed;
                 continue;
             }
-            if ((g_gfm_extensions & GFM_ENABLE_TAGFILTER) && is_disallowed_html_tag(text + i, len - i, &tag_consumed)) {
+            if ((g_gfm_extensions & GFM_ENABLE_TAGFILTER) &&
+                is_disallowed_html_tag(text + i, len - i, &tag_consumed)) {
                 sb_append(sb, "&lt;");
                 sb_append_n(sb, text + i + 1, tag_consumed - 2);
                 sb_append_char(sb, '>');
@@ -960,21 +1129,26 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
             continue;
         }
 
-        if ((g_gfm_extensions & GFM_ENABLE_AUTOLINK) && !pos_inside_code_span(text, len, i) && !pos_inside_link(text, len, i, refs, n_refs)) {
-            if (i == 0 || (!isalnum((unsigned char)text[i-1]) && text[i-1] != '.' && text[i-1] != '/')) {
+        if ((g_gfm_extensions & GFM_ENABLE_AUTOLINK) &&
+            !pos_inside_code_span(text, len, i) &&
+            !pos_inside_link(text, len, i, refs, n_refs)) {
+            if (i == 0 || (!isalnum((unsigned char)text[i - 1]) && text[i - 1] != '.' &&
+                           text[i - 1] != '/')) {
                 size_t au_consumed = 0;
                 if (is_valid_www_autolink(text + i, len - i, &au_consumed)) {
                     sb_append(sb, "<a href=\"http://");
                     for (size_t wi = 0; wi < au_consumed; wi++) {
                         unsigned char c = (unsigned char)(text[i + wi]);
                         if (c == '&') sb_append(sb, "&amp;");
-                        else sb_append_char(sb, c);
+                        else
+                            sb_append_char(sb, c);
                     }
                     sb_append(sb, "\">");
                     for (size_t wi = 0; wi < au_consumed; wi++) {
                         unsigned char c = (unsigned char)(text[i + wi]);
                         if (c == '&') sb_append(sb, "&amp;");
-                        else sb_append_char(sb, c);
+                        else
+                            sb_append_char(sb, c);
                     }
                     sb_append(sb, "</a>");
                     i += au_consumed;
@@ -985,30 +1159,36 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
                     for (size_t wi = 0; wi < au_consumed; wi++) {
                         unsigned char c = (unsigned char)(text[i + wi]);
                         if (c == '&') sb_append(sb, "&amp;");
-                        else sb_append_char(sb, c);
+                        else
+                            sb_append_char(sb, c);
                     }
                     sb_append(sb, "\">");
                     for (size_t wi = 0; wi < au_consumed; wi++) {
                         unsigned char c = (unsigned char)(text[i + wi]);
                         if (c == '&') sb_append(sb, "&amp;");
-                        else sb_append_char(sb, c);
+                        else
+                            sb_append_char(sb, c);
                     }
                     sb_append(sb, "</a>");
                     i += au_consumed;
                     continue;
                 }
-                if (is_valid_email_autolink_nobracket(text + i, len - i, &au_consumed)) {
+                if (is_valid_email_autolink_nobracket(
+                        text + i, len - i, &au_consumed
+                    )) {
                     sb_append(sb, "<a href=\"mailto:");
                     for (size_t ei = 0; ei < au_consumed; ei++) {
                         unsigned char c = (unsigned char)(text[i + ei]);
                         if (c == '&') sb_append(sb, "&amp;");
-                        else sb_append_char(sb, c);
+                        else
+                            sb_append_char(sb, c);
                     }
                     sb_append(sb, "\">");
                     for (size_t ei = 0; ei < au_consumed; ei++) {
                         unsigned char c = (unsigned char)(text[i + ei]);
                         if (c == '&') sb_append(sb, "&amp;");
-                        else sb_append_char(sb, c);
+                        else
+                            sb_append_char(sb, c);
                     }
                     sb_append(sb, "</a>");
                     i += au_consumed;
@@ -1026,7 +1206,15 @@ static void render_inline_impl(StringBuilder *sb, const char *text, size_t len, 
     }
 }
 
-void render_inline(StringBuilder *sb, const char *text, size_t len, int allow_emphasis, int allow_links, RefDef *refs, int n_refs) {
+void render_inline(
+    StringBuilder *sb,
+    const char *text,
+    size_t len,
+    int allow_emphasis,
+    int allow_links,
+    RefDef *refs,
+    int n_refs
+) {
     while (len > 0 && (text[len - 1] == ' ' || text[len - 1] == '\t')) len--;
     render_inline_impl(sb, text, len, allow_emphasis, allow_links, refs, n_refs);
 }
