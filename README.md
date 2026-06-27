@@ -1,6 +1,10 @@
 ComVerter - The Common Converter
 ================================
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![CI](https://github.com/MPCodeWriter21/comverter/actions/workflows/ci.yml/badge.svg)](https://github.com/MPCodeWriter21/comverter/actions/workflows/ci.yml)
+
 ComVerter is a simple C Python extension that I plan to use for converting some simple
 formats to others. Like Markdown to HTML, HTML to PDF, and many others.
 

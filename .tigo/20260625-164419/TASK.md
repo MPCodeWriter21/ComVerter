@@ -1,6 +1,6 @@
 # Add badges to the README
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 50
 - TAGS: readme
 
