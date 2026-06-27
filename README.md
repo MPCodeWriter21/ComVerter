@@ -75,7 +75,7 @@ Pass the `extensions` parameter with a list of extension names, or use
 | `"autolink"`   | Auto-link URLs and email addresses                         |
 | `"tagfilter"`  | Filter out certain HTML tags for security                  |
 
-See `docs/extensions.md` for detailed documentation of each extension.
+See [docs/md_extensions.md](./docs/md_extensions.md) for detailed documentation of each extension.
 
 Development
 ----------
