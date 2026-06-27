@@ -1,6 +1,6 @@
 # Improve Makefile
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 80
 - TAGS: DX, make
 
