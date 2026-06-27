@@ -3,7 +3,27 @@ name: CI
 on:
   push:
     branches: [master]
+    paths:
+      - ".github/workflows/ci.yml"
+      - "meson.build"
+      - "pyproject.toml"
+      - "src/**/*.c"
+      - "src/**/*.h"
+      - "src/**/*.py"
+      - "src/**/*.pyi"
+      - "tests/**/*.py"
+      - "tests/**/*.json"
   pull_request:
+    paths:
+      - ".github/workflows/ci.yml"
+      - "meson.build"
+      - "pyproject.toml"
+      - "src/**/*.c"
+      - "src/**/*.h"
+      - "src/**/*.py"
+      - "src/**/*.pyi"
+      - "tests/**/*.py"
+      - "tests/**/*.json"
 
 jobs:
   test:
