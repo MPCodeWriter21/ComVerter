@@ -20,3 +20,5 @@ This should:
 - Be tested with integration-style tests
 
 Use `log21` for handling CLI arguments and logging.
+
+This is significant enough to up the minor version.
