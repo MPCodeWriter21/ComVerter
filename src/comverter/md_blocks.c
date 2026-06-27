@@ -1597,7 +1597,7 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                                     bq_depth--;
                                 }
                                 in_blockquote = 0;
-                                /* Fall through — let normal processing handle the line
+                                /* Fall through: let normal processing handle the line
                                  * as a regular list item */
                             }
                             else {
@@ -1822,7 +1822,7 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                     bq_ci++;
                 if (bq_had_blank_same_depth && bq_ci < bq_rem &&
                     bq_ci < bq_list_content_col) {
-                    /* Close current list item — line doesn't continue the item */
+                    /* Close current list item: line doesn't continue the item */
                     if (bq_is_loose || bq_in_list_bq_open) {
                         if (sb->len > 0 && sb->data[sb->len - 1] != '\n')
                             sb_append_char(sb, '\n');
@@ -2066,7 +2066,7 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                                         sb_append(sb, "</blockquote>\n");
                                         bq_in_list_bq_open = 0;
                                     }
-                                    /* Flush item content — loose wraps in <p>, tight
+                                    /* Flush item content: loose wraps in <p>, tight
                                      * renders inline */
                                     if (bq_has_content) {
                                         if (bq_is_loose || bq_had_blank_same_depth ||
@@ -2134,7 +2134,7 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                                 }
                             }
                             else if (bq_in_list) {
-                                /* Still in list context — content within the current
+                                /* Still in list context: content within the current
                                  * list item */
                                 if (bq_in_list_bq_open) {
                                     if (bq_has_content) sb_append_char(para_buf, '\n');
@@ -2524,7 +2524,7 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                     }
                 }
                 else {
-                    /* No space/tab after marker — use mc+2 for empty items */
+                    /* No space/tab after marker: use mc+2 for empty items */
                     cc = mc + 2;
                     sp = sep_pos;
                 }
@@ -2545,7 +2545,7 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                     for (int d = list_depth - 1; d >= 0; d--) {
                         if (mc >= list_stack[d].marker_col &&
                             mc < list_stack[d].marker_col + 4) {
-                            /* Marker is within 3 spaces of this list's start — valid
+                            /* Marker is within 3 spaces of this list's start: valid
                              * sibling range */
                             if (mc >= list_stack[d].content_col) {
                                 if (!list_stack[d].after_blank ||
@@ -2564,14 +2564,14 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                             break;
                         }
                         else if (mc >= list_stack[d].content_col) {
-                            /* Past sibling range but at or past content column —
+                            /* Past sibling range but at or past content column:
                              * sublist */
                             slot = d;
                             sub = 1;
                             break;
                         }
                         else if (mc >= list_stack[d].marker_col) {
-                            /* Past sibling range and below content column —
+                            /* Past sibling range and below content column:
                              * continuation text */
                             break;
                         }

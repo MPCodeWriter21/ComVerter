@@ -61,6 +61,10 @@ Code conventions
 - Tests use `pytest`
 - CI runs on GitHub Actions across Python 3.10–3.14
 - Docstrings use reStructuredText (Sphinx) format
+- Avoid non-trivial characters (e.g. em-dash `—`, curly quotes, non-ASCII
+  punctuation) in source code files — stick to ASCII
+- Stage files one by one with explicit paths (`git add file1 file2`); do NOT
+  use `git add -A` or `git add .` to avoid committing unintended files
 
 Documentation
 -------------

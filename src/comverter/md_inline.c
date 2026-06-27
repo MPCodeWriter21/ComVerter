@@ -897,7 +897,7 @@ static void render_inline_impl(
                 size_t ns = link_start;
                 while (ns < text_end) {
                     if (text[ns] == '[') {
-                        /* Skip ![ for images — images inside links are valid */
+                        /* Skip ![ for images; images inside links are valid */
                         if (ns > link_start && text[ns - 1] == '!') {
                             ns++;
                             continue;

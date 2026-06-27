@@ -65,7 +65,7 @@ int is_html_tag(const char *text, size_t len, size_t *consumed) {
         }
         return 0;
     }
-    /* Close tag: </tagname> — no attributes allowed per spec */
+    /* Close tag: </tagname> (no attributes allowed per spec) */
     if (len >= 3 && text[1] == '/') {
         if (!isalpha((unsigned char)text[2])) return 0;
         size_t j = 3;
