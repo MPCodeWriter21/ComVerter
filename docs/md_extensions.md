@@ -27,10 +27,10 @@ The following tags are filtered per the GFM spec:
 
 **Example:**
 
-.. code:: python
-
-    >>> markdown_to_html("<script>alert(1)</script>", extensions=["tagfilter"])
-    '&lt;script>alert(1)&lt;/script>\n'
+```pycon
+>>> markdown_to_html("<script>alert(1)</script>", extensions=["tagfilter"])
+'&lt;script>alert(1)&lt;/script>\n'
+```
 
 ``"autolink"``
 --------------
@@ -40,7 +40,7 @@ Markdown link syntax.
 
 **Example:**
 
-.. code:: python
-
-    >>> markdown_to_html("Visit https://example.com", extensions=["autolink"])
-    '<p>Visit <a href="https://example.com">https://example.com</a></p>\n'
+```pycon
+>>> markdown_to_html("Visit https://example.com", extensions=["autolink"])
+'<p>Visit <a href="https://example.com">https://example.com</a></p>\n'
+```
