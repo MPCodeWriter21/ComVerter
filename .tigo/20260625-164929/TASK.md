@@ -1,6 +1,6 @@
 # Add releases
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 60
 - TAGS: publish, release
 
