@@ -2,7 +2,7 @@ from pathlib import Path
 
 from comverter import markdown_to_html
 
-root = Path(__file__).parent
+root = Path(__file__).parent.parent
 
 with open(root / "README.md", "r") as file:
     markdown_data = file.read()
