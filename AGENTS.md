@@ -28,6 +28,9 @@ Instructions
 - When the user says "note this" or "note that", they mean write it to
   AGENTS.md so the instruction persists across sessions.
 
+- Always use the latest stable version for all packages (including GitHub
+  Actions) across all configuration files.
+
 Documentation
 -------------
 
