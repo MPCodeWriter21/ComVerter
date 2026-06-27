@@ -62,3 +62,5 @@ Expected output:
   opening block tag right in the output functions of `md_blocks.c`
   (and any other file that emits block-level HTML tags).
 - No Unicode detection is needed — the browser handles it.
+
+This is a significant enough to upgrade to minor version of the package.
