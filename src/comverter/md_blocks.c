@@ -567,6 +567,12 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
     int bq_in_html_block = 0;
     int bq_is_paragraph = 0;
     int bq_in_indented_code = 0;
+    int bq_in_list = 0;        /* 1=inside a UL/OL emitted directly from blockquote handler */
+    int bq_in_list_type = 0;   /* 1=UL, 2=OL */
+    int bq_in_list_bq_open = 0;/* 1=inner <blockquote> is open within the list item */
+    int bq_is_loose = 0;       /* 1=list item has become loose (blank line inside) */
+    int bq_had_blank_same_depth = 0; /* 1=blank line seen at current blockquote depth */
+    size_t bq_list_content_col = 0;  /* content column of current bq_in_list item */
     int in_indented_code = 0;
     size_t ic_target_col = 4;
     int code_pending_newlines = 0;
@@ -1146,7 +1152,28 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
             }
             if (is_new_list_item) {
                 /* Close the blockquote and let this line be processed normally as a list */
-                bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs);
+                if (bq_in_list) {
+                    if (bq_is_loose || bq_had_blank_same_depth || bq_in_list_bq_open) {
+                        if (sb->len > 0 && sb->data[sb->len - 1] != '\n') sb_append_char(sb, '\n');
+                        bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs);
+                    } else {
+                        if (bq_has_content) {
+                            render_inline(sb, para_buf->data, para_buf->len, 1, 1, refs, n_refs);
+                            bq_has_content = 0;
+                            para_buf->len = 0;
+                            para_buf->data[0] = '\0';
+                        }
+                    }
+                    if (bq_in_list_bq_open) { sb_append(sb, "</blockquote>\n"); bq_in_list_bq_open = 0; }
+                    sb_append(sb, "</li>\n");
+                    if (bq_in_list_type == 1) sb_append(sb, "</ul>\n");
+                    else sb_append(sb, "</ol>\n");
+                    bq_in_list = 0;
+                    bq_is_loose = 0;
+                    bq_had_blank_same_depth = 0;
+                } else {
+                    bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs);
+                }
                 while (bq_depth > 0) { sb_append(sb, "</blockquote>\n"); bq_depth--; }
                 in_blockquote = 0;
             } else {
@@ -1165,6 +1192,56 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                     }
                 }
                 if (!bq_closed_for_list) {
+                if (bq_in_list) {
+                    /* Check if this line starts a new list item (which should close the blockquote) */
+                    size_t bq_li_indent = get_indent(line, trimmed_len);
+                    int bq_new_li = 0, bq_new_ol = 0;
+                    if (bq_li_indent < 4 && trimmed_len > bq_li_indent + 1) {
+                        char c = line[bq_li_indent];
+                        if ((c == '-' || c == '*' || c == '+') && bq_li_indent + 1 < trimmed_len && line[bq_li_indent + 1] == ' ') bq_new_li = 1;
+                        else {
+                            size_t bq_ds = bq_li_indent; int num = 0, dc = 0;
+                            while (bq_ds < trimmed_len && isdigit((unsigned char)line[bq_ds]) && dc < 10) { num = num * 10 + (line[bq_ds] - '0'); bq_ds++; dc++; }
+                            if (dc > 0 && bq_ds < trimmed_len && (line[bq_ds] == '.' || line[bq_ds] == ')') && bq_ds + 1 < trimmed_len && (line[bq_ds + 1] == ' ' || line[bq_ds + 1] == '\t')) bq_new_ol = 1;
+                        }
+                    }
+                    if (bq_new_li || bq_new_ol) {
+                        /* Close current list and blockquote entirely */
+                        if (bq_is_loose || bq_had_blank_same_depth || bq_in_list_bq_open) {
+                            bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs);
+                        } else {
+                            if (bq_has_content) {
+                                render_inline(sb, para_buf->data, para_buf->len, 1, 1, refs, n_refs);
+                                bq_has_content = 0;
+                                para_buf->len = 0;
+                                para_buf->data[0] = '\0';
+                            }
+                        }
+                        if (bq_in_list_bq_open) { sb_append(sb, "</blockquote>\n"); bq_in_list_bq_open = 0; }
+                        sb_append(sb, "</li>\n");
+                        if (bq_in_list_type == 1) sb_append(sb, "</ul>\n");
+                        else sb_append(sb, "</ol>\n");
+                        bq_in_list = 0;
+                        bq_is_loose = 0;
+                        bq_had_blank_same_depth = 0;
+                        while (bq_depth > 0) { sb_append(sb, "</blockquote>\n"); bq_depth--; }
+                        in_blockquote = 0;
+                        /* Fall through — let normal processing handle the line as a regular list item */
+                    } else {
+                        /* Lazy continuation: line continues the list item's paragraph */
+                        if (trimmed_len > 0) {
+                            sb_append_char(para_buf, '\n');
+                            const char *lc = line;
+                            size_t lcl = trimmed_len;
+                            while (lcl > 0 && (*lc == ' ' || *lc == '\t')) { lc++; lcl--; }
+                            sb_append_n(para_buf, lc, lcl);
+                            bq_has_content = 1;
+                            bq_is_paragraph = 1;
+                        }
+                        p = line_end + 1;
+                        continue;
+                    }
+                }
                 int is_ol = 0;
                 size_t d_start = get_indent(line, trimmed_len);
                 int num = 0;
@@ -1255,11 +1332,19 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
             }
             size_t qpos = bq_start;
             int marker_count = 0;
-            /* Count consecutive > markers (with optional single space between) */
-            while (qpos < trimmed_len && line[qpos] == '>') {
-                marker_count++;
+            /* Count consecutive > markers (matching cmark: for each level, skip whitespace, check for >) */
+            if (qpos < trimmed_len && line[qpos] == '>') {
+                marker_count = 1;
                 qpos++;
-                if (qpos < trimmed_len && line[qpos] == ' ') qpos++;
+                if (qpos < trimmed_len && (line[qpos] == ' ' || line[qpos] == '\t')) qpos++;
+                while (qpos < trimmed_len) {
+                    size_t wp = qpos;
+                    while (wp < trimmed_len && (line[wp] == ' ' || line[wp] == '\t')) wp++;
+                    if (wp >= trimmed_len || line[wp] != '>') break;
+                    marker_count++;
+                    qpos = wp + 1;
+                    if (qpos < trimmed_len && (line[qpos] == ' ' || line[qpos] == '\t')) qpos++;
+                }
             }
             /* Adjust nesting depth: open or close blockquote tags */
             while (bq_depth < marker_count) {
@@ -1269,7 +1354,28 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
             int bq_lazy = (bq_is_paragraph && marker_count < bq_depth);
             if (!bq_lazy) {
                 while (bq_depth > marker_count) {
-                    bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs);
+                    if (bq_in_list) {
+                        if (bq_is_loose || bq_in_list_bq_open) {
+                            if (sb->len > 0 && sb->data[sb->len - 1] != '\n') sb_append_char(sb, '\n');
+                            bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs);
+                        } else {
+                            if (bq_has_content) {
+                                render_inline(sb, para_buf->data, para_buf->len, 1, 1, refs, n_refs);
+                                bq_has_content = 0;
+                                para_buf->len = 0;
+                                para_buf->data[0] = '\0';
+                            }
+                        }
+                        if (bq_in_list_bq_open) { sb_append(sb, "</blockquote>\n"); bq_in_list_bq_open = 0; }
+                        sb_append(sb, "</li>\n");
+                        if (bq_in_list_type == 1) sb_append(sb, "</ul>\n");
+                        else sb_append(sb, "</ol>\n");
+                        bq_in_list = 0;
+                        bq_is_loose = 0;
+                        bq_had_blank_same_depth = 0;
+                    } else {
+                        bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs);
+                    }
                     bq_is_paragraph = 0;
                     sb_append(sb, "</blockquote>\n");
                     bq_depth--;
@@ -1279,12 +1385,41 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
             if (marker_count > 0 && !bq_lazy) {
                 bq_in_html_block = 0;
             }
+            /* Check if a non-blank line at same depth continues the current bq_in_list item.
+               Only close the list when bq_had_blank_same_depth is set (blank line preceded this content).
+               Without a blank line, the content is a lazy continuation of the paragraph. */
+            if (bq_in_list && marker_count == bq_depth && qpos < trimmed_len) {
+                size_t bq_rem = line_len > qpos ? line_len - qpos : 0;
+                size_t bq_ci = 0;
+                while (bq_ci < bq_rem && (line[qpos + bq_ci] == ' ' || line[qpos + bq_ci] == '\t')) bq_ci++;
+                if (bq_had_blank_same_depth && bq_ci < bq_rem && bq_ci < bq_list_content_col) {
+                    /* Close current list item — line doesn't continue the item */
+                    if (bq_is_loose || bq_in_list_bq_open) {
+                        if (sb->len > 0 && sb->data[sb->len - 1] != '\n') sb_append_char(sb, '\n');
+                        bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs);
+                    } else {
+                        if (bq_has_content) {
+                            render_inline(sb, para_buf->data, para_buf->len, 1, 1, refs, n_refs);
+                            bq_has_content = 0;
+                            para_buf->len = 0;
+                            para_buf->data[0] = '\0';
+                        }
+                    }
+                    if (bq_in_list_bq_open) { sb_append(sb, "</blockquote>\n"); bq_in_list_bq_open = 0; }
+                    sb_append(sb, "</li>\n");
+                    if (bq_in_list_type == 1) sb_append(sb, "</ul>\n");
+                    else sb_append(sb, "</ol>\n");
+                    bq_in_list = 0;
+                    bq_is_loose = 0;
+                    bq_had_blank_same_depth = 0;
+                }
+            }
             /* content_col tracks the column offset after the last > marker */
             size_t content_col = 0;
             if (qpos < trimmed_len) {
                 size_t rem = line_len > qpos ? line_len - qpos : 0;
                 size_t indent = get_indent_tab_from(line + qpos, rem, content_col);
-                if (indent >= 4) {
+                if (indent >= 4 && !bq_in_list) {
                     if (bq_in_indented_code) {
                         size_t leftover = 0;
                         size_t consumed = consume_indent(line + qpos, rem, content_col, &leftover);
@@ -1380,16 +1515,114 @@ char *markdown_to_html(const char *markdown, size_t md_len) {
                                 bq_has_content = 0;
                             }
                         } else {
-                            if (bq_has_content) sb_append_char(para_buf, '\n');
-                            bq_has_content = 1;
-                            bq_is_paragraph = 1;
-                            sb_append_n(para_buf, bq_content + 0, content_len);
+                            /* Check for list markers in blockquote content */
+                            size_t bc_indent = 0;
+                            while (bc_indent < content_len && bc_indent < 3 && bq_content[bc_indent] == ' ') bc_indent++;
+                            int bq_is_list = 0;
+                            int bq_list_type = 0;
+                            size_t bq_list_am = 0;
+                            if (bc_indent < 4 && content_len > bc_indent) {
+                                char c = bq_content[bc_indent];
+                                if ((c == '-' || c == '*' || c == '+') && bc_indent + 1 < content_len &&
+                                    (bq_content[bc_indent + 1] == ' ' || bq_content[bc_indent + 1] == '\t')) {
+                                    bq_is_list = 1; bq_list_type = 1;
+                                    bq_list_am = bc_indent + 2;
+                                    while (bq_list_am < content_len && (bq_content[bq_list_am] == ' ' || bq_content[bq_list_am] == '\t')) bq_list_am++;
+                                } else {
+                                    size_t ds = bc_indent; int num = 0, digit_count = 0;
+                                    while (ds < content_len && isdigit((unsigned char)bq_content[ds]) && digit_count < 10) { num = num * 10 + (bq_content[ds] - '0'); ds++; digit_count++; }
+                                    if (digit_count > 0 && digit_count <= 9 && ds < content_len && (bq_content[ds] == '.' || bq_content[ds] == ')') && ds + 1 < content_len && (bq_content[ds + 1] == ' ' || bq_content[ds + 1] == '\t')) {
+                                        bq_is_list = 1; bq_list_type = 2;
+                                        bq_list_am = ds + 2;
+                                        while (bq_list_am < content_len && (bq_content[bq_list_am] == ' ' || bq_content[bq_list_am] == '\t')) bq_list_am++;
+                                    }
+                                }
+                            }
+                            if (bq_is_list) {
+                                /* Close any existing paragraph and start list */
+                                if (bq_has_content) bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs);
+                                bq_is_paragraph = 0;
+                                if (bq_in_list) {
+                                    /* Close previous list item */
+                                    if (bq_in_list_bq_open) { bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs); }
+                                    if (bq_in_list_bq_open) { sb_append(sb, "</blockquote>\n"); bq_in_list_bq_open = 0; }
+                                    /* Flush item content — loose wraps in <p>, tight renders inline */
+                                    if (bq_has_content) {
+                                        if (bq_is_loose || bq_had_blank_same_depth || bq_in_list_bq_open) {
+                                            if (sb->len > 0 && sb->data[sb->len - 1] != '\n') sb_append_char(sb, '\n');
+                                            bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs);
+                                            bq_is_loose = 1;
+                                        } else {
+                                            render_inline(sb, para_buf->data, para_buf->len, 1, 1, refs, n_refs);
+                                            bq_has_content = 0;
+                                            para_buf->len = 0;
+                                            para_buf->data[0] = '\0';
+                                        }
+                                    }
+                                    bq_had_blank_same_depth = 0;
+                                    sb_append(sb, "</li>\n<li>");
+                                } else {
+                                    if (bq_list_type == 1) sb_append(sb, "<ul>\n<li>");
+                                    else sb_append(sb, "<ol>\n<li>");
+                                }
+                                bq_in_list = 1;
+                                bq_in_list_type = bq_list_type;
+                                bq_in_list_bq_open = 0;
+                                bq_is_loose = 0;
+                                bq_had_blank_same_depth = 0;
+                                bq_list_content_col = bq_list_am;
+                                /* Check for inner blockquote marker after list marker */
+                                int bq_has_inner_bq = (bq_list_am < content_len && bq_content[bq_list_am] == '>');
+                                if (bq_has_inner_bq) {
+                                    sb_append(sb, "\n<blockquote>\n");
+                                    bq_in_list_bq_open = 1;
+                                    bq_list_am++;
+                                    if (bq_list_am < content_len && bq_content[bq_list_am] == ' ') bq_list_am++;
+                                }
+                                size_t bq_re = content_len;
+                                while (bq_re > bq_list_am && (bq_content[bq_re - 1] == ' ' || bq_content[bq_re - 1] == '\t')) bq_re--;
+                                if (bq_list_am < bq_re) {
+                                    /* Always store in para_buf to handle blank-line-induced looseness */
+                                    sb_append_n(para_buf, bq_content + bq_list_am, bq_re - bq_list_am);
+                                    bq_has_content = 1;
+                                    bq_is_paragraph = 1;
+                                }
+                            } else if (bq_in_list) {
+                                /* Still in list context — content within the current list item */
+                                if (bq_in_list_bq_open) {
+                                    if (bq_has_content) sb_append_char(para_buf, '\n');
+                                    bq_has_content = 1;
+                                    bq_is_paragraph = 1;
+                                    sb_append_n(para_buf, bq_content + 0, content_len);
+                                } else {
+                                    if (bq_had_blank_same_depth) {
+                                        if (sb->len > 0 && sb->data[sb->len - 1] != '\n') sb_append_char(sb, '\n');
+                                        bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs);
+                                        bq_is_loose = 1;
+                                        bq_had_blank_same_depth = 0;
+                                    }
+                                    if (bq_has_content) sb_append_char(para_buf, '\n');
+                                    bq_has_content = 1;
+                                    bq_is_paragraph = 1;
+                                    sb_append_n(para_buf, bq_content + 0, content_len);
+                                }
+                            } else {
+                                /* Normal paragraph content within blockquote */
+                                if (bq_has_content) sb_append_char(para_buf, '\n');
+                                bq_has_content = 1;
+                                bq_is_paragraph = 1;
+                                sb_append_n(para_buf, bq_content + 0, content_len);
+                            }
                         }
                     }
                 }
             } else if (bq_has_content) {
-                /* Empty blockquote line (> with no content): flush paragraph, start new one */
-                bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs);
+                /* Empty blockquote line (> with no content) */
+                if (bq_in_list) {
+                    bq_had_blank_same_depth = 1;
+                } else {
+                    bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs);
+                }
                 bq_is_paragraph = 0;
             }
             p = line_end + 1;
@@ -2432,7 +2665,27 @@ fallback_paragraph:
     }
 
     if (in_blockquote) {
-        bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs);
+        if (bq_in_list) {
+            if (bq_is_loose || bq_in_list_bq_open) {
+                bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs);
+            } else {
+                if (bq_has_content) {
+                    render_inline(sb, para_buf->data, para_buf->len, 1, 1, refs, n_refs);
+                    bq_has_content = 0;
+                    para_buf->len = 0;
+                    para_buf->data[0] = '\0';
+                }
+            }
+            if (bq_in_list_bq_open) { sb_append(sb, "</blockquote>\n"); bq_in_list_bq_open = 0; }
+            sb_append(sb, "</li>\n");
+            if (bq_in_list_type == 1) sb_append(sb, "</ul>\n");
+            else sb_append(sb, "</ol>\n");
+            bq_in_list = 0;
+            bq_is_loose = 0;
+            bq_had_blank_same_depth = 0;
+        } else {
+            bq_flush_content(sb, para_buf, &bq_has_content, &bq_in_indented_code, refs, n_refs);
+        }
         while (bq_depth > 0) { sb_append(sb, "</blockquote>\n"); bq_depth--; }
     }
     if (para_has_content) {
