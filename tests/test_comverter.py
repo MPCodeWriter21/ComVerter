@@ -225,9 +225,29 @@ def test_complex_document():
 def test_module_all():
     import comverter
 
-    assert comverter.__all__ == ["markdown_to_html"]
+    assert comverter.__all__ == ["markdown_to_html", "markdown_file_to_html"]
 
 
 def test_invalid_type():
     with pytest.raises(TypeError):
         markdown_to_html(123)
+
+
+def test_markdown_file_to_html():
+    import os
+    import tempfile
+
+    from comverter import markdown_file_to_html
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+        f.write("Hello, **world**!")
+        inpath = f.name
+    outpath = inpath + ".html"
+    try:
+        markdown_file_to_html(inpath, outpath)
+        with open(outpath) as f:
+            assert f.read() == "<p>Hello, <strong>world</strong>!</p>\n"
+    finally:
+        os.unlink(inpath)
+        if os.path.exists(outpath):
+            os.unlink(outpath)

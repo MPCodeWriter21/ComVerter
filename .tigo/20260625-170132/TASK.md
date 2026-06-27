@@ -1,6 +1,6 @@
 # Stream to stream
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 60
 - TAGS: file, feature, enhancement
 
