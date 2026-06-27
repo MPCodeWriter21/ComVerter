@@ -25,17 +25,24 @@ Usage
 -----
 
 ```python
->>> from comverter import markdown_to_html
+>>> from comverter import markdown_to_html, markdown_file_to_html, ALL_MARKDOWN_EXTENSIONS
 
 >>> markdown_to_html("Hello, **world**!")
 '<p>Hello, <strong>world</strong>!</p>\n'
 
-# Enable GFM extensions
+# Convert a Markdown file to HTML
+>>> markdown_file_to_html("input.md", "output.html")
+
+# Enable all extensions at once
+>>> markdown_to_html("Hello **world**", extensions=ALL_MARKDOWN_EXTENSIONS)
+'<p>Hello <strong>world</strong></p>\n'
+
+# Enable extensions individually
 >>> markdown_to_html("http://example.com", extensions=["autolink"])
 '<p><a href=\"http://example.com\">http://example.com</a></p>\n'
 
->>> markdown_to_html("<x>", extensions=["tagfilter"])
-'<p>&lt;x&gt;</p>\n'
+>>> markdown_to_html("<script>", extensions=["tagfilter"])
+'&lt;script>\n'
 ```
 
 ### Supported Markdown features
@@ -58,14 +65,17 @@ Usage
 - **Setext headings** — `Heading\n===` (level 1) and `Heading\n---` (level 2)
 - **GFM pipe tables** — `\| a \| b \|\n\|---\|---\|\n\| 1 \| 2 \|` with optional alignment
 
-### GFM Extensions
+### Extensions
 
-Pass the `extensions` parameter with a list of extension names:
+Pass the `extensions` parameter with a list of extension names, or use
+`ALL_MARKDOWN_EXTENSIONS` to enable all at once.
 
 | Extension      | Description                                                |
 |----------------|------------------------------------------------------------|
 | `"autolink"`   | Auto-link URLs and email addresses                         |
 | `"tagfilter"`  | Filter out certain HTML tags for security                  |
+
+See `docs/extensions.md` for detailed documentation of each extension.
 
 Development
 ----------

@@ -1,6 +1,6 @@
 import pytest
 
-from comverter import markdown_to_html
+from comverter import ALL_MARKDOWN_EXTENSIONS, markdown_to_html
 
 
 def test_paragraph():
@@ -251,3 +251,19 @@ def test_markdown_file_to_html():
         os.unlink(inpath)
         if os.path.exists(outpath):
             os.unlink(outpath)
+
+
+def test_readme_examples():
+    """Verify all code examples in README.md produce the documented output."""
+    assert (
+        markdown_to_html("Hello, **world**!")
+        == "<p>Hello, <strong>world</strong>!</p>\n"
+    )
+    assert (
+        markdown_to_html("Hello **world**", extensions=ALL_MARKDOWN_EXTENSIONS)
+        == "<p>Hello <strong>world</strong></p>\n"
+    )
+    assert markdown_to_html("http://example.com", extensions=["autolink"]) == (
+        '<p><a href="http://example.com">http://example.com</a></p>\n'
+    )
+    assert markdown_to_html("<script>", extensions=["tagfilter"]) == ("&lt;script>\n")

@@ -25,6 +25,19 @@ Instructions
 - When the user says "note this" or "note that", they mean write it to
   AGENTS.md so the instruction persists across sessions.
 
+Documentation
+-------------
+
+- All code changes include documentation (README.md updates, CHANGELOG.md, docstrings, etc.)
+- README is the main source of truth for build/install/usage but it is not alone!
+  `docs/` will contain every detail that did not fit in README.md.
+- Every public function must have a docstring (in the .pyi stub and the C source)
+- Custom extensions and features not based on public specs must be explained
+  completely in `docs/`
+- All code examples in README and docs must be verified against real output
+  from running the code; if the output changes, update the docs or add a test
+  that locks in the expected output
+
 - Never revert/override changes made by the user without asking for confirmation.
 - Always ask for clarification if the user request is ambiguous.
 - Do not commit anything without running the tests first.
