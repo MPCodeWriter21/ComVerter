@@ -18,6 +18,10 @@ Instructions
   represent a meaningful change in functionality (new feature, breaking
   change, significant fix). Minor for features, patch for bug fixes.
 
+- Task implementation and closing must be in the same commit. Only separate
+  them in rare cases (e.g. when a hotfix is needed before the task is fully
+  done).
+
 - Never revert/override changes made by the user without asking for confirmation.
 - Always ask for clarification if the user request is ambiguous.
 - Do not commit anything without running the tests first.
