@@ -1,4 +1,4 @@
-.PHONY: all setup reconfigure build install test test-all clean help
+.PHONY: all setup reconfigure build install test test-all clean format help
 
 BUILDDIR ?= builddir
 
@@ -9,6 +9,7 @@ help:
 	@echo "  setup       - Create venv and configure meson"
 	@echo "  reconfigure - Reconfigure meson"
 	@echo "  build       - Build the C extension"
+	@echo "  format      - Run all source formatters"
 	@echo "  test        - Run tests until 3 fail"
 	@echo "  test-all    - Run all the tests"
 	@echo "  clean       - Remove build artifacts (keeps venv)"
@@ -29,6 +30,9 @@ reconfigure:
 build:
 	uv run meson compile -C $(BUILDDIR)
 	uv build --wheel
+
+format:
+	uv run pre-commit run --all-files
 
 install:
 	uv pip install -e .

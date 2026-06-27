@@ -77,6 +77,7 @@ Run `make help` to see all available targets:
 | `make build`      | Build the C extension and wheel          |
 | `make install`    | Install the package in editable mode     |
 | `make test`       | Run tests (stop after 3 failures)        |
+| `make format`     | Run all source formatters                |
 | `make test-all`   | Run all tests                            |
 | `make clean`      | Remove all build artifacts               |
 
