@@ -22,6 +22,9 @@ Instructions
   them in rare cases (e.g. when a hotfix is needed before the task is fully
   done).
 
+- Do not commit anything without asking the user for confirmation first.
+  Always verify that the user is ready for the changes to be committed.
+
 - When the user says "note this" or "note that", they mean write it to
   AGENTS.md so the instruction persists across sessions.
 
