@@ -31,6 +31,14 @@ Build system
 - **Python support**: 3.10+
 - **Makefile targets**: `setup`, `reconfigure`, `build`, `test`, `wheel`, `clean`, `clean-all`
 
+Commit convention
+------------------
+
+When a commit is related to a task, the task ID must appear in the commit
+message: `type(Task YYYYMMDD-HHmmss): message`. Commits that are not
+related to any task (e.g. chore-only or trivial fixes) do not need to
+reference one.
+
 Task management (Tigo)
 ----------------------
 
