@@ -59,9 +59,11 @@ static PyObject *_comverter_markdown_to_html(PyObject *module, PyObject *args, P
 static PyMethodDef _comverter_methods[] = {
     {"markdown_to_html", (PyCFunction)_comverter_markdown_to_html, METH_VARARGS | METH_KEYWORDS,
      "Convert Markdown text to HTML.\n\n"
+     "Implements the CommonMark 0.31.2 spec and GitHub Flavored Markdown.\n\n"
      "Args:\n"
-     "    markdown_text (str): The Markdown string to convert.\n"
-     "    extensions (list, optional): List of GFM extensions to enable (e.g. [\"tagfilter\"]).\n"
+     "    markdown (str): The Markdown string to convert.\n"
+     "    extensions (list, optional): GFM extensions to enable.\n"
+     "        Supported values: \"tagfilter\", \"autolink\".\n"
      "Returns:\n"
      "    str: The resulting HTML string.\n"
      "Raises:\n"

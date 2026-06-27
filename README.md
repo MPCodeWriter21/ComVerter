@@ -22,8 +22,16 @@ Usage
 
 ```python
 >>> from comverter import markdown_to_html
+
 >>> markdown_to_html("Hello, **world**!")
 '<p>Hello, <strong>world</strong>!</p>\n'
+
+# Enable GFM extensions
+>>> markdown_to_html("http://example.com", extensions=["autolink"])
+'<p><a href=\"http://example.com\">http://example.com</a></p>\n'
+
+>>> markdown_to_html("<x>", extensions=["tagfilter"])
+'<p>&lt;x&gt;</p>\n'
 ```
 
 ### Supported Markdown features
@@ -46,6 +54,15 @@ Usage
 - **Setext headings** — `Heading\n===` (level 1) and `Heading\n---` (level 2)
 - **GFM pipe tables** — `\| a \| b \|\n\|---\|---\|\n\| 1 \| 2 \|` with optional alignment
 
+### GFM Extensions
+
+Pass the `extensions` parameter with a list of extension names:
+
+| Extension      | Description                                                |
+|----------------|------------------------------------------------------------|
+| `"autolink"`   | Auto-link URLs and email addresses                         |
+| `"tagfilter"`  | Filter out certain HTML tags for security                  |
+
 Development
 ----------
 
@@ -53,12 +70,15 @@ Development
 
 Run `make help` to see all available targets:
 
-| Target       | Description                              |
-|--------------|------------------------------------------|
-| `make setup` | Create venv and configure meson          |
-| `make build` | Build the C extension                    |
-| `make test`  | Run tests                                |
-| `make clean` | Remove build artifacts                   |
+| Target            | Description                              |
+|-------------------|------------------------------------------|
+| `make setup`      | Create venv and configure meson          |
+| `make reconfigure`| Reconfigure meson                        |
+| `make build`      | Build the C extension and wheel          |
+| `make install`    | Install the package in editable mode     |
+| `make test`       | Run tests (stop after 3 failures)        |
+| `make test-all`   | Run all tests                            |
+| `make clean`      | Remove all build artifacts               |
 
 ### LSP
 
