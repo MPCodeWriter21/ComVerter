@@ -22,6 +22,9 @@ Instructions
   them in rare cases (e.g. when a hotfix is needed before the task is fully
   done).
 
+- When the user says "note this" or "note that", they mean write it to
+  AGENTS.md so the instruction persists across sessions.
+
 - Never revert/override changes made by the user without asking for confirmation.
 - Always ask for clarification if the user request is ambiguous.
 - Do not commit anything without running the tests first.
