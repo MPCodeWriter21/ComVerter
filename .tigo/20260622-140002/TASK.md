@@ -22,3 +22,7 @@ This should:
 Use `log21` for handling CLI arguments and logging.
 
 This is significant enough to up the minor version.
+
+The default for Markdown to HTML conversion should use themes (Task(20260623-103247)) and there should be a flag like `--raw` which will output unstyled HTML.
+
+Keep in mind that this tool will have functionalities other than converting Markdown to HTML, so the CLI must not be based on only MD to HTML conversion and should probably have a sub-command for it.
